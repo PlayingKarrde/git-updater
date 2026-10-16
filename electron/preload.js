@@ -31,5 +31,8 @@ contextBridge.exposeInMainWorld('api', {
   selfUpdateLastApply: () => ipcRenderer.invoke('selfupdate:lastApply'),
   selfUpdateOpenRelease: () => ipcRenderer.invoke('selfupdate:openRelease'),
   getVersion: () => ipcRenderer.invoke('app:version'),
+  tokenStatus: () => ipcRenderer.invoke('token:status'),
+  setToken: (token) => ipcRenderer.invoke('token:set', token),
+  clearToken: () => ipcRenderer.invoke('token:clear'),
   getPlatform: () => ipcRenderer.invoke('app:platform'),
 });
