@@ -92,6 +92,14 @@ the thing being replaced.
 Prefer beta builds for a specific app? Tick *include beta (pre-release) versions* when
 adding it.
 
+Want games in `C:\Games` and everything else in `C:\Apps`? Add a **category** in Settings
+with its own folder, then pick it when adding an app (or ⋯ → *Move to …*). The list groups
+apps by category, and moving an app between categories moves its folder too.
+Click a category's header to collapse it, and drag apps or categories to reorder them.
+
+Want one app somewhere else entirely? ⋯ → *Edit…* and set its **Folder**; leave it empty to
+use the default. Changing it moves the app's files to the new folder.
+
 ## On the open-quake panel
 
 git-updater is also available as a **drop-in app for [open-quake](https://github.com/TeeJS/open-quake)**

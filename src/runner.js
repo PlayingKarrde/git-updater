@@ -95,7 +95,7 @@ async function run(config, opts = {}) {
     const id = displayId(repo);
     if (only && id.toLowerCase() !== only && appKey(repo).toLowerCase() !== only) continue;
     try {
-      results.push(await handleRepo(repo, id, st, { ...opts, portableRoot: config.portableRoot }));
+      results.push(await handleRepo(repo, id, st, { ...opts, portableRoot: core.portableRootFor(config, repo) }));
     } catch (e) {
       results.push({ repo: id, id: appKey(repo), status: 'failed', reason: e.message, stopRun: !!e.rateLimited || !!e.badToken });
       log(`FAIL ${appKey(repo)}: ${e.message}`);

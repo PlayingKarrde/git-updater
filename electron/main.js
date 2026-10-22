@@ -48,7 +48,7 @@ function dirHasFiles(dir) {
 }
 function portableDir(cfg, r) {
   if (r.install && r.install.dir) return r.install.dir;
-  return cfg.portableRoot ? `${cfg.portableRoot.replace(/[\\/]+$/, '')}/${r.repo}` : null;
+  return core.defaultPortableDir(cfg, r);
 }
 
 // Config lives with state in git-updater's own config dir — never the launch cwd.
@@ -75,12 +75,17 @@ function readConfig() {
 }
 
 // Light structural check; the portable-folder requirement is enforced at check/update.
-function saveConfigFile(cfg) {
+function checkConfig(cfg) {
   if (!cfg || !Array.isArray(cfg.repos)) throw new Error('config: "repos" must be an array');
   cfg.repos.forEach((r, i) => {
     if (!r.owner || !r.repo) throw new Error(`app ${i + 1}: owner and repo are required`);
     if (r.type !== 'portable' && r.type !== 'installer') throw new Error(`app ${i + 1}: type must be portable or installer`);
   });
+  core.validateCategories(cfg);
+}
+
+function saveConfigFile(cfg) {
+  checkConfig(cfg);
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   if (fs.existsSync(CONFIG_PATH)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -118,13 +123,62 @@ function clearToken() {
   try { fs.rmSync(TOKEN_PATH, { force: true }); } catch {}
 }
 
+// Window size and position, remembered across launches. Its own small file rather than
+// config.json, which keeps a .bak per save and would collect one per resize.
+const WINDOW_STATE_PATH = path.join(DATA_DIR, 'window-state.json');
+
+function loadWindowState() {
+  try {
+    const s = JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf8'));
+    if (!(s.width > 0 && s.height > 0)) return null;
+    // Restore the position only while it still lands on a connected display (a monitor
+    // may have been unplugged since); otherwise keep the size and let the OS place it.
+    const onScreen =
+      Number.isFinite(s.x) && Number.isFinite(s.y) &&
+      screen.getAllDisplays().some(({ workArea: a }) => s.x < a.x + a.width - 40 && s.x + s.width > a.x + 40 && s.y >= a.y - 10 && s.y < a.y + a.height - 40);
+    return onScreen ? s : { width: s.width, height: s.height, maximized: s.maximized };
+  } catch {
+    return null;
+  }
+}
+function trackWindowState(w, saved) {
+  // At fractional display scaling (125%, 150%) Windows rounds a new window a few pixels
+  // larger than asked, so saving what it reports would grow the window on every launch.
+  // Until the user really moves or resizes it, the bounds it was restored from are kept.
+  const restored = w.getNormalBounds();
+  const near = (a, b) => ['x', 'y', 'width', 'height'].every((k) => Math.abs(a[k] - b[k]) <= 8);
+  let timer = null;
+  const save = () => {
+    clearTimeout(timer);
+    timer = null;
+    if (w.isDestroyed() || w.isMinimized()) return;
+    // getNormalBounds: the size to come back to un-maximized, not the maximized one.
+    const now = w.getNormalBounds();
+    const b = saved && saved.x != null && near(now, restored) ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height } : now;
+    try {
+      fs.mkdirSync(path.dirname(WINDOW_STATE_PATH), { recursive: true });
+      fs.writeFileSync(WINDOW_STATE_PATH, JSON.stringify({ ...b, maximized: w.isMaximized() }));
+    } catch (e) {
+      log(`window state not saved: ${e.message}`);
+    }
+  };
+  const later = () => { clearTimeout(timer); timer = setTimeout(save, 500); };
+  w.on('resize', later);
+  w.on('move', later);
+  w.on('maximize', later);
+  w.on('unmaximize', later);
+  w.on('close', save);
+}
+
 let win;
 function createWindow() {
-  // Tall enough for the whole UI without scrolling, capped at the screen's work area.
+  // First run: tall enough for the whole UI without scrolling, capped at the screen's work area.
   const wa = screen.getPrimaryDisplay().workAreaSize;
+  const saved = loadWindowState();
   win = new BrowserWindow({
-    width: 840,
-    height: Math.min(1000, wa.height),
+    width: saved ? saved.width : 840,
+    height: saved ? saved.height : Math.min(1000, wa.height),
+    ...(saved && saved.x != null ? { x: saved.x, y: saved.y } : {}),
     minWidth: 640,
     minHeight: 480,
     backgroundColor: '#0d1117',
@@ -137,6 +191,8 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  if (saved && saved.maximized) win.maximize();
+  trackWindowState(win, saved);
   win.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
 }
 
@@ -266,10 +322,101 @@ ipcMain.handle('app:launch', async (_e, appKey) => {
   if (err) throw new Error(err);
   return { ok: true, path: target };
 });
+// Moving an app to another category, or changing a category's folder, moves the app's
+// folder with it (see core.planRelocations) — otherwise it would read as "Not installed"
+// with its files stranded in the old place.
 ipcMain.handle('config:save', (_e, cfg) => {
-  saveConfigFile(cfg);
-  return { ok: true };
+  checkConfig(cfg);
+  let prev;
+  try {
+    prev = readConfig();
+  } catch {
+    prev = { repos: [] }; // unreadable on disk: nothing to move from
+  }
+  const moves = core.planRelocations(prev, cfg);
+  if (!moves.length) {
+    saveConfigFile(cfg);
+    return { ok: true, moved: [], notes: [] };
+  }
+  if (updating) throw new Error('wait for the update to finish, then move the app');
+  const rel = relocate(moves);
+  try {
+    saveConfigFile(cfg);
+  } catch (e) {
+    rel.undo();
+    throw e;
+  }
+  rel.commit();
+  return { ok: true, moved: rel.moved, notes: rel.notes };
 });
+
+// All or nothing: a folder that cannot move (usually because the app is running) puts
+// back every one already moved, so config.json never points where the app is not.
+// Same volume -> one rename. Across volumes -> copy now, and delete the original only in
+// commit(), once the new config is saved.
+function relocate(moves) {
+  const done = [];
+  const notes = [];
+  const undo = () => {
+    for (const d of done.slice().reverse()) {
+      try {
+        if (d.copied) fs.rmSync(d.to, { recursive: true, force: true });
+        else fs.renameSync(d.to, d.from);
+      } catch (e) {
+        log(`relocate undo ${d.to} -> ${d.from} FAILED: ${e.message}`);
+      }
+    }
+  };
+  for (const m of moves) {
+    const from = path.resolve(m.from);
+    const to = path.resolve(m.to);
+    const name = m.key.split('#')[0];
+    if (!dirHasFiles(from)) continue; // not installed yet — it simply installs in the new place
+    if (dirHasFiles(to)) {
+      notes.push(`${name}: ${to} already has files, so those are used; the old copy is still in ${from}`);
+      continue;
+    }
+    try {
+      if (to.toLowerCase().startsWith(from.toLowerCase() + path.sep)) throw new Error('the new folder is inside the old one');
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      try {
+        fs.rmdirSync(to); // an empty folder already there would block the rename
+      } catch {}
+      try {
+        fs.renameSync(from, to);
+        done.push({ from, to, copied: false });
+      } catch (e) {
+        if (e.code !== 'EXDEV') throw e;
+        try {
+          fs.cpSync(from, to, { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
+        } catch (ce) {
+          fs.rmSync(to, { recursive: true, force: true });
+          throw ce;
+        }
+        done.push({ from, to, copied: true });
+      }
+      log(`moved ${name}: ${from} -> ${to}`);
+    } catch (e) {
+      undo();
+      const why = e.code === 'EPERM' || e.code === 'EBUSY' || e.code === 'EACCES' ? 'is it running? Close it and try again' : e.message;
+      throw new Error(`couldn't move ${name} to ${to} — ${why}`);
+    }
+  }
+  return {
+    moved: done.map((d) => ({ from: d.from, to: d.to })),
+    notes,
+    undo,
+    commit() {
+      for (const d of done.filter((x) => x.copied)) {
+        try {
+          fs.rmSync(d.from, { recursive: true, force: true });
+        } catch (e) {
+          notes.push(`copied to ${d.to}, but the old copy in ${d.from} could not be deleted: ${e.message}`);
+        }
+      }
+    },
+  };
+}
 ipcMain.handle('config:open', () => shell.openPath(CONFIG_PATH));
 ipcMain.handle('log:open', () => shell.openPath(LOG_FILE));
 
@@ -425,9 +572,9 @@ ipcMain.handle('token:clear', () => {
   return { ok: true };
 });
 
-ipcMain.handle('pick-folder', async () => {
+ipcMain.handle('pick-folder', async (_e, title) => {
   const r = await dialog.showOpenDialog(win, {
-    title: 'Select the portable apps folder',
+    title: typeof title === 'string' && title ? title : 'Select the portable apps folder',
     properties: ['openDirectory', 'createDirectory'],
   });
   return { path: r.canceled || !r.filePaths.length ? '' : r.filePaths[0] };
@@ -454,7 +601,11 @@ function applyRetypes(results) {
     entry.type = to;
     // Portable needs a folder to unpack into. Installer does not, but the folder is kept
     // rather than dropped so switching back by hand does not lose the chosen location.
-    if (to === 'portable') entry.install = { ...(entry.install || {}), dir: r.retyped.dir };
+    // A dir that is just the default (category folder or portableRoot) is not pinned, so
+    // the app keeps following its category if that changes later.
+    if (to === 'portable' && r.retyped.dir !== core.defaultPortableDir(cfg, entry)) {
+      entry.install = { ...(entry.install || {}), dir: r.retyped.dir };
+    }
     hits[to].push(`${owner}/${repo}`);
   }
   if (!hits.portable.length && !hits.installer.length) return;
