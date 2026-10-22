@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   openApp: (appKey) => ipcRenderer.invoke('app:launch', appKey),
   validateRepo: (owner, repo, prerelease) => ipcRenderer.invoke('repo:validate', { owner, repo, prerelease }),
   closeApp: (appKey, force) => ipcRenderer.invoke('app:close', { appKey, force }),
-  pickFolder: (title) => ipcRenderer.invoke('pick-folder', title),
+  pickFolder: (title, startDir) => ipcRenderer.invoke('pick-folder', title, startDir),
   openRelease: (owner, repo) => ipcRenderer.invoke('release:open', { owner, repo }),
   previewAsset: (appKey) => ipcRenderer.invoke('asset:preview', appKey),
   check: (body) => ipcRenderer.invoke('check', body),

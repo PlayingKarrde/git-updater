@@ -122,3 +122,15 @@ test("clearing an app's own folder moves it back to the default", () => {
   const after = { ...base(), repos: [app({ category: 'Games' })] };
   assert.deepStrictEqual(core.planRelocations(before, after, 'win32').map((m) => m.to), ['C:/Games/open-quake']);
 });
+
+test('a folder just set to the default location is kept, and nothing moves', () => {
+  const before = { ...base(), repos: [app({ category: 'Games' })] };
+  const after = { ...base(), repos: [app({ category: 'Games', install: { dir: 'C:/Games/open-quake' } })] };
+  assert.deepStrictEqual(core.planRelocations(before, after, 'win32'), []);
+  assert.strictEqual(after.repos[0].install.dir, 'C:/Games/open-quake');
+});
+
+test('a backslash folder gets a backslash before the repo name', () => {
+  assert.strictEqual(core.resolvePortableDir('E:\\Games\\Recomps\\', 'quiver-launcher'), 'E:\\Games\\Recomps\\quiver-launcher');
+  assert.strictEqual(core.resolvePortableDir('/home/me/Apps', 'ShareX'), '/home/me/Apps/ShareX');
+});

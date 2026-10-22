@@ -95,6 +95,7 @@
     grid-template-columns:
       24px              /* checkbox */
       minmax(0, 1fr)    /* app */
+      120px             /* owner */
       66px              /* type */
       94px              /* current */
       94px              /* available */
@@ -106,7 +107,7 @@
   }
   .table-header > *,
   .app-row > * { min-width: 0; }
-  .app-name, .current-version, .available-version, .status {
+  .app-name, .owner, .current-version, .available-version, .status {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .current-version, .available-version { font-variant-numeric: tabular-nums; }
@@ -135,14 +136,26 @@
   .cat-item .dir { font: 400 13px var(--mono); color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cat-item .n { font-size: .8rem; color: var(--faint); flex: none; }
   .app-name { font: 500 14px var(--mono); }
+  .owner { font: 400 13px var(--mono); color: var(--muted); }
   .status { display: inline-flex; align-items: center; gap: .4rem; font-size: .88rem; }
   .status .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Narrow card: hide the Type column (container query on the card, not the viewport). */
-  @container (max-width: 720px) {
+  /* Narrower card: drop the Type column, then Owner too (container queries on the card,
+     not the viewport). The App column is the one that stretches; the rest stay a fixed
+     block on the right. The owner is still in the App name's tooltip. */
+  @container (max-width: 860px) {
     .table-header,
-    .app-row { grid-template-columns: 24px minmax(0, 1fr) 88px 88px 120px 100px; column-gap: 8px; }
+    .app-row { grid-template-columns: 24px minmax(0, 1fr) 120px 94px 94px 130px 100px; }
     /* .badge sets display later in the cascade; child selector out-specifies it */
     .table-header > .type-cell, .app-row > .type-cell { display: none; }
+  }
+  @container (max-width: 720px) {
+    .table-header,
+    .app-row { grid-template-columns: 24px minmax(0, 1fr) 100px 88px 88px 120px 100px; column-gap: 8px; }
+  }
+  @container (max-width: 600px) {
+    .table-header,
+    .app-row { grid-template-columns: 24px minmax(0, 1fr) 88px 88px 120px 100px; }
+    .table-header > .owner-cell, .app-row > .owner-cell { display: none; }
   }
   .badge { display: inline-block; font: 600 .72rem var(--sans); padding: .12rem .5rem; border-radius: 999px; border: 1px solid transparent; }
   .badge.portable { color: var(--blue); background: rgba(88,166,255,.12); border-color: rgba(88,166,255,.3); }
@@ -212,7 +225,7 @@
     <div class="table-wrapper">
       <div class="table-header">
         <span><input type="checkbox" id="selAll" title="Select all"></span>
-        <span>App</span><span class="type-cell">Type</span><span>Current</span><span>Available</span><span>Status</span><span></span>
+        <span>App</span><span class="owner-cell">Owner</span><span class="type-cell">Type</span><span>Current</span><span>Available</span><span>Status</span><span></span>
       </div>
       <div id="rows"></div>
     </div>
@@ -241,6 +254,11 @@
         <span style="color:var(--muted);font-size:12px;flex:none">Folder</span>
         <input type="text" id="newDir" aria-label="Install folder" style="height:31px;font-size:13px">
         <button id="newDirBrowse" style="height:31px">Browse…</button>
+      </div>
+      <div class="row" id="dirSubRow" style="margin-top:.35rem; gap:.4rem">
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:12px;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="dirUseRepo" checked> <span id="dirUseRepoText">put it in a subfolder named after the app</span>
+        </label>
       </div>
       <p class="helper" id="addHint">GitHub releases URL; the right download for this computer is selected automatically.</p>
     </section>
@@ -364,7 +382,9 @@ const cats = () => config.categories || [];
 const findCat = (name) => (name ? cats().find((c) => c.name.toLowerCase() === String(name).toLowerCase()) : null);
 const catOf = (r) => findCat(r.category);
 // Where a portable app unpacks when it has no folder of its own: <category or portable folder>/<repo>.
-const defaultDir = (repo, cat) => { const root = cat ? cat.dir : config.portableRoot; return root && repo ? `${root.replace(/[\\/]+$/, '')}/${repo}` : ''; };
+// The same join as the engine's resolvePortableDir: a backslash if the folder has one.
+const joinDir = (root, name) => `${root.replace(/[\\/]+$/, '')}${root.includes('\\') ? '\\' : '/'}${name}`;
+const defaultDir = (repo, cat) => { const root = cat ? cat.dir : config.portableRoot; return root && repo ? joinDir(root, repo) : ''; };
 const dirOf = (r) => (r.install && r.install.dir) || defaultDir(r.repo, catOf(r));
 
 // Collapsed groups are a view preference, so they live in this window's localStorage, not
@@ -453,16 +473,18 @@ function renderRow(r, group) {
   const tb = $('rows');
   const key = keyOf(r);
   const s = st[key] || (st[key] = { ph: 'idle' });
-  const row = el('div', 'app-row'); // 7 grid children, same template as the header
+  const row = el('div', 'app-row'); // 8 grid children, same template as the header
   if (!busy) makeDraggable(row, { kind: 'app', group, item: r }, (x, target, after) => reorder('repos', x, target, after));
 
   const cb = el('input'); cb.type = 'checkbox'; cb.checked = selected.has(key);
   cb.onchange = () => { cb.checked ? selected.add(key) : selected.delete(key); syncBar(); };
   row.appendChild(cb);
 
-  const appSpan = el('span', 'app-name', `${r.owner}/${r.repo}${r.prerelease ? ' β' : ''}`);
+  const appSpan = el('span', 'app-name', `${r.repo}${r.prerelease ? ' β' : ''}`);
   appSpan.title = `${r.owner}/${r.repo}` + (r.prerelease ? ' — tracking beta (pre-release) versions' : '') + (r.type === 'portable' && dirOf(r) ? `\nFolder: ${dirOf(r)}` : '');
   row.appendChild(appSpan);
+  const ownerSpan = el('span', 'owner owner-cell', r.owner); ownerSpan.title = r.owner;
+  row.appendChild(ownerSpan);
   row.appendChild(el('span', 'type-cell badge ' + (r.type === 'installer' ? 'installer' : 'portable'), r.type === 'installer' ? 'Installer' : 'Portable'));
 
   // Current
@@ -604,7 +626,7 @@ function renderCats() {
     ch.onclick = async () => {
       if (busy) return msg('Wait for the current check or update to finish.', 'bad');
       let p;
-      try { ({ path: p } = await window.api.pickFolder(`Select the folder for ${c.name}`)); } catch (e) { return msg(clean(e), 'bad'); }
+      try { ({ path: p } = await window.api.pickFolder(`Select the folder for ${c.name}`, c.dir)); } catch (e) { return msg(clean(e), 'bad'); }
       if (!p) return;
       c.dir = p;
       if (n) msg(`Moving ${c.name} apps…`, 'info');
@@ -729,18 +751,31 @@ let editingKey = null;
 const ADD_HINT = 'Paste a GitHub releases URL; git-updater selects the right download for this computer automatically.';
 function setTypeToggle(type) { $('newType').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.type === type)); syncDirField(); }
 
-// The per-app folder: portable only. Empty means the default, which the placeholder spells out.
+// The per-app folder: portable only. Empty means the default, which the placeholder spells
+// out. With the subfolder box ticked (the default) the folder chosen is where the app's own
+// <repo> folder goes, the same way a category folder works; unticked, the app unpacks
+// straight into it.
+const chosenDir = (repo) => { const v = $('newDir').value.trim(); return v && $('dirUseRepo').checked ? joinDir(v, repo) : v; };
 function syncDirField() {
-  $('dirRow').style.display = selectedType() === 'portable' ? '' : 'none';
+  const portable = selectedType() === 'portable';
+  $('dirRow').style.display = portable ? '' : 'none';
+  $('dirSubRow').style.display = portable && $('newDir').value.trim() ? '' : 'none';
   const parsed = parseRepo($('newRepo').value);
-  const def = defaultDir(parsed ? parsed.repo : '<repo>', findCat($('newCat').value));
+  const repo = parsed ? parsed.repo : '<repo>';
+  const def = defaultDir(repo, findCat($('newCat').value));
   $('newDir').placeholder = def ? `Default: ${def}` : 'Choose a folder, or set the portable apps folder in Settings';
-  $('newDir').title = 'The folder this app unpacks into. Leave empty to use the default' + (def ? ` (${def}).` : '.');
+  $('newDir').title = 'The folder this app goes in. Leave empty to use the default' + (def ? ` (${def}).` : '.');
+  $('dirUseRepoText').textContent = `put it in a subfolder named ${repo} (installs to ${chosenDir(repo)})`;
 }
 $('newRepo').addEventListener('input', syncDirField);
 $('newCat').addEventListener('change', syncDirField);
+$('newDir').addEventListener('input', syncDirField);
+$('dirUseRepo').addEventListener('change', syncDirField);
+// Opens where the app would go now: the folder typed in, else its category's (or the
+// portable apps) folder.
 $('newDirBrowse').onclick = async () => {
-  try { const { path: p } = await window.api.pickFolder('Select the folder this app unpacks into'); if (p) $('newDir').value = p; }
+  const start = $('newDir').value.trim() || (findCat($('newCat').value) || {}).dir || config.portableRoot || '';
+  try { const { path: p } = await window.api.pickFolder('Select the folder for this app', start); if (p) { $('newDir').value = p; syncDirField(); } }
   catch (e) { msg(clean(e), 'bad'); }
 };
 $('newDir').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('addRepo').click(); if (e.key === 'Escape' && editingKey) cancelEdit(); });
@@ -751,7 +786,12 @@ function startEdit(r) {
   setTypeToggle(r.type);
   $('preRel').checked = !!r.prerelease;
   $('newCat').value = catOf(r) ? catOf(r).name : '';
-  $('newDir').value = (r.install && r.install.dir) || '';
+  // A folder ending in the repo's own name shows as its parent with the subfolder box ticked.
+  const pin = ((r.install && r.install.dir) || '').replace(/[\\/]+$/, '');
+  const m = /^(.+)[\\/]([^\\/]+)$/.exec(pin);
+  const sub = !!m && m[2].toLowerCase() === r.repo.toLowerCase();
+  $('newDir').value = sub ? m[1] : pin;
+  $('dirUseRepo').checked = sub || !pin;
   syncDirField();
   $('addRepo').textContent = 'Save';
   $('cancelEdit').style.display = '';
@@ -767,6 +807,7 @@ function cancelEdit() {
   $('preRel').checked = false;
   $('newCat').value = '';
   $('newDir').value = '';
+  $('dirUseRepo').checked = true;
   syncDirField();
   $('addHint').textContent = ADD_HINT;
   msg('', '');
@@ -780,27 +821,33 @@ $('addRepo').onclick = async () => {
   if (!parsed) return msg('Paste a GitHub releases URL or owner/repo.', 'bad');
   const type = selectedType();
   const category = $('newCat').value || null;
-  const dir = type === 'portable' ? $('newDir').value.trim() : '';
+  const dir = type === 'portable' ? chosenDir(parsed.repo) : '';
   if (type === 'portable' && !category && !dir && !$('portableRoot').value.trim()) { $('settings').open = true; return msg('Set the portable apps folder first — see Settings.', 'bad'); }
-  if (editingKey && busy) return msg('Wait for the current check or update to finish.', 'bad');
   const dup = config.repos.some((r) => r.owner === parsed.owner && r.repo === parsed.repo && r.type === type && keyOf(r) !== editingKey);
   if (dup) return msg(`${parsed.owner}/${parsed.repo} (${type}) is already in your list.`, 'bad');
+  // An edit that only changes the category or folder asks GitHub nothing: same release, same
+  // row state. That also lets it save while a check is running.
+  let entry = editingKey && config.repos.find((r) => keyOf(r) === editingKey);
+  const newKey = `${parsed.owner}/${parsed.repo}#${type}`;
+  const sameRelease = !!entry && newKey === editingKey && !!entry.prerelease === $('preRel').checked;
+  if (!sameRelease && busy) return msg('Wait for the current check or update to finish.', 'bad');
 
-  $('addRepo').disabled = true;
-  msg(`Checking ${parsed.owner}/${parsed.repo}…`, 'info');
-  try {
-    await window.api.validateRepo(parsed.owner, parsed.repo, $('preRel').checked);
-  } catch (e) {
+  if (!sameRelease) {
+    $('addRepo').disabled = true;
+    msg(`Checking ${parsed.owner}/${parsed.repo}…`, 'info');
+    try {
+      await window.api.validateRepo(parsed.owner, parsed.repo, $('preRel').checked);
+    } catch (e) {
+      $('addRepo').disabled = false;
+      return msg(`Can't ${editingKey ? 'save' : 'add'} ${parsed.owner}/${parsed.repo} — ${clean(e)}. Check the owner/repo.`, 'bad');
+    }
     $('addRepo').disabled = false;
-    return msg(`Can't ${editingKey ? 'save' : 'add'} ${parsed.owner}/${parsed.repo} — ${clean(e)}. Check the owner/repo.`, 'bad');
   }
-  $('addRepo').disabled = false;
 
   // An edit changes the entry in place, so it keeps its position in the list and any
   // overrides set by hand in config.json (asset pattern, tag prefix, installer args, …).
-  let entry = editingKey && config.repos.find((r) => keyOf(r) === editingKey);
   if (entry) {
-    delete st[editingKey]; selected.delete(editingKey);
+    if (!sameRelease) { delete st[editingKey]; selected.delete(editingKey); }
     Object.assign(entry, { owner: parsed.owner, repo: parsed.repo, type });
   } else {
     entry = { owner: parsed.owner, repo: parsed.repo, type };
@@ -816,7 +863,7 @@ $('addRepo').onclick = async () => {
   const wasEditing = !!editingKey;
   cancelEdit();
   if (!(await afterMove(await saveConfig(), wasEditing ? 'Saved.' : 'Added.'))) return;
-  checkApps([`${parsed.owner}/${parsed.repo}#${type}`]); // populate available for the new/edited entry
+  if (!sameRelease) checkApps([newKey]); // populate available for the new/edited entry
 };
 $('newRepo').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('addRepo').click(); if (e.key === 'Escape' && editingKey) cancelEdit(); });
 async function removeRepo(r) {

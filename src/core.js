@@ -285,10 +285,13 @@ function installerCmd(kind, file, argsOverride) {
 
 // "C:/PortableApps"  + "ShareX" -> "C:/PortableApps/ShareX"
 // "/home/tj/Apps"     + "ShareX" -> "/home/tj/Apps/ShareX"
-// A forward slash rather than path.join, so the separator matches whatever the user
-// typed in Settings; Windows APIs and POSIX both accept it.
+// "E:\Games"          + "ShareX" -> "E:\Games\ShareX"
+// Not path.join: the separator follows whatever the user typed (a backslash if the folder
+// has one, else a forward slash), so paths read the way they were entered. Windows APIs
+// and POSIX accept either.
 function resolvePortableDir(portableRoot, repoName) {
-  return `${String(portableRoot).replace(/[\\/]+$/, '')}/${repoName}`;
+  const root = String(portableRoot);
+  return `${root.replace(/[\\/]+$/, '')}${root.includes('\\') ? '\\' : '/'}${repoName}`;
 }
 
 // Categories group apps, and each has its own folder: a portable app in "Games" unpacks
@@ -346,10 +349,11 @@ function normDir(d, platform = process.platform) {
 // A plain portableRoot change moves nothing — that has always just pointed git-updater
 // at a different folder, and still does.
 //
-// An install.dir that is unchanged is left alone. One that merely equals the old default
-// while a category is involved (an automatic type correction writes it that way) is NOT
-// a choice anyone made, so it is dropped from newCfg here and the app follows its
-// category like any other.
+// An install.dir that is unchanged is left alone. One that was already there, unchanged,
+// and merely equals the old default while a category is involved (an automatic type
+// correction writes it that way) is NOT a choice anyone made, so it is dropped from newCfg
+// here and the app follows its category like any other. One just set is a choice, even
+// when it names the default folder, and is kept.
 function planRelocations(oldCfg, newCfg, platform = process.platform) {
   const moves = [];
   const keyOf = (r) => `${r.owner}/${r.repo}#${r.type}`;
@@ -363,7 +367,7 @@ function planRelocations(oldCfg, newCfg, platform = process.platform) {
     const oldPin = (prev.install && prev.install.dir) || null;
     let pin = (r.install && r.install.dir) || null;
     const inCategory = !!(prev.category || r.category);
-    if (pin && inCategory && oldDefault && same(pin, oldDefault)) {
+    if (pin && oldPin && same(pin, oldPin) && inCategory && oldDefault && same(pin, oldDefault)) {
       delete r.install.dir;
       if (!Object.keys(r.install).length) delete r.install;
       pin = null;

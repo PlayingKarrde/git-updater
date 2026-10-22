@@ -176,7 +176,7 @@ function createWindow() {
   const wa = screen.getPrimaryDisplay().workAreaSize;
   const saved = loadWindowState();
   win = new BrowserWindow({
-    width: saved ? saved.width : 840,
+    width: saved ? saved.width : 960, // wide enough for every column on first run
     height: saved ? saved.height : Math.min(1000, wa.height),
     ...(saved && saved.x != null ? { x: saved.x, y: saved.y } : {}),
     minWidth: 640,
@@ -572,9 +572,18 @@ ipcMain.handle('token:clear', () => {
   return { ok: true };
 });
 
-ipcMain.handle('pick-folder', async (_e, title) => {
+// startDir: where the dialog opens. A folder that does not exist yet opens at its nearest
+// existing parent rather than at the dialog's last-used place.
+ipcMain.handle('pick-folder', async (_e, title, startDir) => {
+  let defaultPath;
+  if (typeof startDir === 'string' && startDir.trim()) {
+    let d = path.resolve(startDir.trim());
+    while (!fs.existsSync(d) && path.dirname(d) !== d) d = path.dirname(d);
+    if (fs.existsSync(d)) defaultPath = d;
+  }
   const r = await dialog.showOpenDialog(win, {
     title: typeof title === 'string' && title ? title : 'Select the portable apps folder',
+    defaultPath,
     properties: ['openDirectory', 'createDirectory'],
   });
   return { path: r.canceled || !r.filePaths.length ? '' : r.filePaths[0] };

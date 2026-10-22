@@ -98,7 +98,8 @@ apps by category, and moving an app between categories moves its folder too.
 Click a category's header to collapse it, and drag apps or categories to reorder them.
 
 Want one app somewhere else entirely? ⋯ → *Edit…* and set its **Folder**; leave it empty to
-use the default. Changing it moves the app's files to the new folder.
+use the default. By default the app gets its own subfolder named after it inside the folder
+you pick; untick that to unpack straight into it. Changing it moves the app's files there.
 
 ## On the open-quake panel
 
