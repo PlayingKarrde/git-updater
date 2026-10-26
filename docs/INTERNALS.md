@@ -27,8 +27,12 @@ the running platform automatically:
 ```jsonc
 {
   "portableRoot": "C:/PortableApps",     // portable apps install to <portableRoot>/<repo>
+  "categories": [                         // optional: each category has its own folder
+    { "name": "Games", "dir": "C:/Games" }
+  ],
   "repos": [
     { "owner": "ShareX", "repo": "ShareX", "type": "portable" },
+    { "owner": "TeeJS", "repo": "open-quake", "type": "portable", "category": "Games" }, // -> C:/Games/open-quake
     { "owner": "TeeJS", "repo": "tts-stt-windows", "type": "installer" }
   ]
 }
@@ -47,7 +51,7 @@ bonuses — are all in `src/platform/assets.js`, which is pure data so `core.js`
 
 Optional per-app overrides (rarely needed):
 - `"asset": "*-win-x64.zip"` (glob or `/regex/`) pins a specific file instead of auto-pick.
-- Portable: `"install": { "dir": "D:/Custom" }` to override the folder.
+- Portable: `"install": { "dir": "D:/Custom" }` to override the folder (it wins over a category).
 - Installer: `"install": { "kind": "inno", "args": ["/VERYSILENT"] }` — required when detection
   can't identify an unusual installer (`kind` is `msi` | `nsis` | `inno` | `pkg` | `deb` | `rpm`).
 - `"prerelease": true` follows beta releases; `"detect"` / `"process"` override the registry
@@ -55,6 +59,19 @@ Optional per-app overrides (rarely needed):
 - `"tagPrefix": "desktop-v"` pins release lookup to one train, for repos that publish several
   products' releases in one place (e.g. bitwarden/clients also ships `web-v*`/`browser-v*`/
   `cli-v*` — without this, "latest release" can resolve to the wrong product entirely).
+
+Categories are matched by name, case-insensitively; an app naming a category that isn't defined
+is a config error. Saving a config that moves a portable app to a different category folder —
+an app changing category, a category's `dir` changing, or an app's own `install.dir` being set,
+changed or cleared (the *Folder* field when editing an app) — moves the app's folder in the same
+step (`core.planRelocations`, then `relocate` in `electron/main.js`): all or nothing, so if one
+folder can't move (usually because the app is running) every move is put back and the config is
+not saved. Changing `portableRoot` itself still moves nothing.
+
+The order of `repos` and `categories` is the order the list shows them in; dragging in the UI
+rewrites it. Which categories are collapsed is a view preference kept in the window's
+localStorage, and the window's size and position live in `window-state.json` beside the config —
+neither goes in config.json, which writes a `.bak` on every save.
 
 You can track the same repo as **both** portable and installed — each is a separate entry with
 its own update history.

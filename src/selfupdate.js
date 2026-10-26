@@ -42,7 +42,7 @@ const paths = require('./paths');
 const { log } = require('./log');
 
 // Overridable for testing against a repo other than the real one.
-const REPO_OWNER = process.env.GITUPDATER_SELFUPDATE_OWNER || 'TeeJS';
+const REPO_OWNER = process.env.GITUPDATER_SELFUPDATE_OWNER || 'PlayingKarrde';
 const REPO_NAME = process.env.GITUPDATER_SELFUPDATE_REPO || 'git-updater';
 
 const IS_WIN = process.platform === 'win32';

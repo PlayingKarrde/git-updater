@@ -285,16 +285,108 @@ function installerCmd(kind, file, argsOverride) {
 
 // "C:/PortableApps"  + "ShareX" -> "C:/PortableApps/ShareX"
 // "/home/tj/Apps"     + "ShareX" -> "/home/tj/Apps/ShareX"
-// A forward slash rather than path.join, so the separator matches whatever the user
-// typed in Settings; Windows APIs and POSIX both accept it.
+// "E:\Games"          + "ShareX" -> "E:\Games\ShareX"
+// Not path.join: the separator follows whatever the user typed (a backslash if the folder
+// has one, else a forward slash), so paths read the way they were entered. Windows APIs
+// and POSIX accept either.
 function resolvePortableDir(portableRoot, repoName) {
-  return `${String(portableRoot).replace(/[\\/]+$/, '')}/${repoName}`;
+  const root = String(portableRoot);
+  return `${root.replace(/[\\/]+$/, '')}${root.includes('\\') ? '\\' : '/'}${repoName}`;
 }
 
-// Validates, and fills each portable entry's install.dir from a top-level
-// portableRoot when omitted. Mutates json in place so callers get resolved dirs.
+// Categories group apps, and each has its own folder: a portable app in "Games" unpacks
+// into <Games dir>/<repo> instead of <portableRoot>/<repo>. Apps reference a category by
+// name, matched case-insensitively.
+//   "categories": [{ "name": "Games", "dir": "C:/Games" }]
+//   { "owner": "TeeJS", "repo": "open-quake", "type": "portable", "category": "Games" }
+function findCategory(json, name) {
+  if (!name || typeof name !== 'string') return null;
+  const k = name.trim().toLowerCase();
+  return ((json && json.categories) || []).find((c) => c && typeof c.name === 'string' && c.name.trim().toLowerCase() === k) || null;
+}
+
+// The folder a portable app's own folder goes in: its category's, else portableRoot.
+function portableRootFor(json, r) {
+  const c = findCategory(json, r.category);
+  return c ? c.dir : (json && json.portableRoot) || null;
+}
+
+// Where a portable app lives when install.dir does not pin it somewhere else.
+function defaultPortableDir(json, r) {
+  const root = portableRootFor(json, r);
+  return root ? resolvePortableDir(root, r.repo) : null;
+}
+
+function validateCategories(json) {
+  if (json.categories != null) {
+    if (!Array.isArray(json.categories)) throw new Error('config: "categories" must be an array');
+    const seen = new Set();
+    json.categories.forEach((c, i) => {
+      if (!c || typeof c.name !== 'string' || !c.name.trim()) throw new Error(`categories[${i}]: "name" is required`);
+      if (typeof c.dir !== 'string' || !c.dir.trim()) throw new Error(`category "${c.name}" needs a folder ("dir")`);
+      const k = c.name.trim().toLowerCase();
+      if (seen.has(k)) throw new Error(`category "${c.name}" is defined twice`);
+      seen.add(k);
+    });
+  }
+  (json.repos || []).forEach((r, i) => {
+    if (r && r.category != null && !findCategory(json, r.category)) {
+      throw new Error(`repos[${i}]: category "${r.category}" is not defined in "categories"`);
+    }
+  });
+}
+
+// Comparable form of a user-typed folder: one separator, no trailing slash, and
+// case-folded on Windows, where C:/Games and c:\games are the same place.
+function normDir(d, platform = process.platform) {
+  const s = String(d).replace(/\\/g, '/').replace(/\/+$/, '');
+  return platform === 'win32' ? s.toLowerCase() : s;
+}
+
+// Which portable app folders have to move when the config goes from oldCfg to newCfg:
+// an app put in (or taken out of) a category, a category whose folder changed, or an
+// app whose own folder (install.dir) was set, changed or cleared. [{ key, from, to }].
+// A plain portableRoot change moves nothing — that has always just pointed git-updater
+// at a different folder, and still does.
+//
+// An install.dir that is unchanged is left alone. One that was already there, unchanged,
+// and merely equals the old default while a category is involved (an automatic type
+// correction writes it that way) is NOT a choice anyone made, so it is dropped from newCfg
+// here and the app follows its category like any other. One just set is a choice, even
+// when it names the default folder, and is kept.
+function planRelocations(oldCfg, newCfg, platform = process.platform) {
+  const moves = [];
+  const keyOf = (r) => `${r.owner}/${r.repo}#${r.type}`;
+  const same = (a, b) => normDir(a, platform) === normDir(b, platform);
+  const oldByKey = new Map((oldCfg.repos || []).map((r) => [keyOf(r), r]));
+  for (const r of newCfg.repos || []) {
+    if (r.type !== 'portable') continue;
+    const prev = oldByKey.get(keyOf(r));
+    if (!prev) continue;
+    const oldDefault = defaultPortableDir(oldCfg, prev);
+    const oldPin = (prev.install && prev.install.dir) || null;
+    let pin = (r.install && r.install.dir) || null;
+    const inCategory = !!(prev.category || r.category);
+    if (pin && oldPin && same(pin, oldPin) && inCategory && oldDefault && same(pin, oldDefault)) {
+      delete r.install.dir;
+      if (!Object.keys(r.install).length) delete r.install;
+      pin = null;
+    }
+    // Neither end pinned and no category: only portableRoot can differ, which moves nothing.
+    if (!pin && !oldPin && !inCategory) continue;
+    const from = oldPin || oldDefault;
+    const to = pin || defaultPortableDir(newCfg, r);
+    if (!from || !to || same(from, to)) continue;
+    moves.push({ key: keyOf(r), from, to });
+  }
+  return moves;
+}
+
+// Validates, and fills each portable entry's install.dir from its category's folder or
+// the top-level portableRoot when omitted. Mutates json in place so callers get resolved dirs.
 function validateConfig(json) {
   if (!json || !Array.isArray(json.repos)) throw new Error('config: "repos" array is required');
+  validateCategories(json);
   json.repos.forEach((r, i) => {
     const at = `repos[${i}]`;
     if (!r.owner || !r.repo) throw new Error(`${at}: "owner" and "repo" are required`);
@@ -310,8 +402,9 @@ function validateConfig(json) {
     if (r.type === 'portable') {
       if (!r.install) r.install = {};
       if (!r.install.dir) {
-        if (!json.portableRoot) throw new Error(`${at}: portable requires install.dir or a top-level portableRoot`);
-        r.install.dir = resolvePortableDir(json.portableRoot, r.repo);
+        const dir = defaultPortableDir(json, r);
+        if (!dir) throw new Error(`${at}: portable requires install.dir, a category, or a top-level portableRoot`);
+        r.install.dir = dir;
       }
     } else {
       // installer: kind is optional (auto-guessed from the picked file); if set, it must be valid.
@@ -430,6 +523,11 @@ module.exports = {
   installerCmd,
   validateConfig,
   resolvePortableDir,
+  findCategory,
+  portableRootFor,
+  defaultPortableDir,
+  validateCategories,
+  planRelocations,
   buildSummary,
   INSTALLER_SWITCHES,
 };

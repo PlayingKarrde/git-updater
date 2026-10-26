@@ -23,7 +23,7 @@
       radial-gradient(700px 500px at 0% 0%, rgba(88,166,255,.06), transparent 55%);
     background-attachment: fixed;
   }
-  .wrap { max-width: 900px; margin: 0 auto; }
+  .wrap { margin: 0 auto; }
   header { display: flex; align-items: center; gap: .7rem; margin-bottom: .25rem; }
   .logo { width: 28px; height: 28px; flex: none; display: grid; place-items: center; }
   .logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -34,10 +34,13 @@
            border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
            margin-bottom: 1rem; box-shadow: 0 8px 24px -18px #000; }
   .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
-  input[type=text] { font: 400 14px var(--mono); padding: .5rem .65rem; border-radius: 8px; color: var(--text);
+  input[type=text], input[type=password] { font: 400 14px var(--mono); padding: .5rem .65rem; border-radius: 8px; color: var(--text);
     background: #0d1117; border: 1px solid var(--border); }
-  input[type=text]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(227,161,60,.18); }
-  input[type=text]::placeholder { color: var(--faint); }
+  input[type=text]:focus, input[type=password]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(227,161,60,.18); }
+  input[type=text]::placeholder, input[type=password]::placeholder { color: var(--faint); }
+  select { font: 400 13.5px var(--sans); padding: 0 .55rem; height: 35px; border-radius: 8px; color: var(--text);
+    background: #0d1117; border: 1px solid var(--border); cursor: pointer; }
+  select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(227,161,60,.18); }
   input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
   button { font: 600 13.5px var(--sans); cursor: pointer; border-radius: 8px; padding: .46rem .78rem;
            border: 1px solid var(--border); background: #21262d; color: var(--text);
@@ -92,6 +95,7 @@
     grid-template-columns:
       24px              /* checkbox */
       minmax(0, 1fr)    /* app */
+      120px             /* owner */
       66px              /* type */
       94px              /* current */
       94px              /* available */
@@ -103,7 +107,7 @@
   }
   .table-header > *,
   .app-row > * { min-width: 0; }
-  .app-name, .current-version, .available-version, .status {
+  .app-name, .owner, .current-version, .available-version, .status {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .current-version, .available-version { font-variant-numeric: tabular-nums; }
@@ -111,15 +115,47 @@
 
   .table-header > span { font: 600 .68rem var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--faint); padding-bottom: .5rem; }
   .app-row { padding: .5rem 0; border-top: 1px solid var(--border); }
+  .group-h { display: flex; align-items: baseline; gap: .6rem; padding: .85rem 0 .35rem; border-top: 1px solid var(--border); min-width: 0;
+             cursor: pointer; user-select: none; }
+  .group-h .chev { flex: none; width: .8rem; color: var(--faint); font-size: .7rem; transition: transform .12s; }
+  .group-h.collapsed .chev { transform: rotate(-90deg); }
+  .group-h .name { font: 600 .8rem var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); flex: none; }
+  .group-h .n { flex: none; font-size: .78rem; color: var(--faint); }
+  .group-h .n .up { color: var(--blue); }
+  .group-h .dir { font: 400 .78rem var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
+  /* Drag to reorder: apps within their group, categories among each other. */
+  [draggable=true] { cursor: grab; }
+  .app-row[draggable=true] input, .app-row[draggable=true] button { cursor: pointer; }
+  .dragging { opacity: .4; }
+  .drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+  .drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+  .cat-list { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .45rem; }
+  .cat-list:empty { display: none; }
+  .cat-item { display: flex; align-items: center; gap: .5rem; min-width: 0; padding: 2px 0; }
+  .cat-item .name { font: 600 13.5px var(--mono); flex: none; }
+  .cat-item .dir { font: 400 13px var(--mono); color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-item .n { font-size: .8rem; color: var(--faint); flex: none; }
   .app-name { font: 500 14px var(--mono); }
+  .owner { font: 400 13px var(--mono); color: var(--muted); }
   .status { display: inline-flex; align-items: center; gap: .4rem; font-size: .88rem; }
   .status .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Narrow card: hide the Type column (container query on the card, not the viewport). */
-  @container (max-width: 720px) {
+  /* Narrower card: drop the Type column, then Owner too (container queries on the card,
+     not the viewport). The App column is the one that stretches; the rest stay a fixed
+     block on the right. The owner is still in the App name's tooltip. */
+  @container (max-width: 860px) {
     .table-header,
-    .app-row { grid-template-columns: 24px minmax(0, 1fr) 88px 88px 120px 100px; column-gap: 8px; }
+    .app-row { grid-template-columns: 24px minmax(0, 1fr) 120px 94px 94px 130px 100px; }
     /* .badge sets display later in the cascade; child selector out-specifies it */
     .table-header > .type-cell, .app-row > .type-cell { display: none; }
+  }
+  @container (max-width: 720px) {
+    .table-header,
+    .app-row { grid-template-columns: 24px minmax(0, 1fr) 100px 88px 88px 120px 100px; column-gap: 8px; }
+  }
+  @container (max-width: 600px) {
+    .table-header,
+    .app-row { grid-template-columns: 24px minmax(0, 1fr) 88px 88px 120px 100px; }
+    .table-header > .owner-cell, .app-row > .owner-cell { display: none; }
   }
   .badge { display: inline-block; font: 600 .72rem var(--sans); padding: .12rem .5rem; border-radius: 999px; border: 1px solid transparent; }
   .badge.portable { color: var(--blue); background: rgba(88,166,255,.12); border-color: rgba(88,166,255,.3); }
@@ -189,7 +225,7 @@
     <div class="table-wrapper">
       <div class="table-header">
         <span><input type="checkbox" id="selAll" title="Select all"></span>
-        <span>App</span><span class="type-cell">Type</span><span>Current</span><span>Available</span><span>Status</span><span></span>
+        <span>App</span><span class="owner-cell">Owner</span><span class="type-cell">Type</span><span>Current</span><span>Available</span><span>Status</span><span></span>
       </div>
       <div id="rows"></div>
     </div>
@@ -205,12 +241,23 @@
           <button type="button" data-type="portable" class="active">Portable</button>
           <button type="button" data-type="installer">Installer</button>
         </div>
+        <select id="newCat" aria-label="Category" title="Category" style="display:none"></select>
         <button id="cancelEdit" style="display:none">Cancel</button>
         <button id="addRepo" class="primary">Add app</button>
       </div>
       <div class="row" style="margin-top:.45rem; gap:.4rem">
         <label style="display:flex;align-items:center;gap:.35rem;font-size:12px;color:var(--muted);cursor:pointer">
           <input type="checkbox" id="preRel"> include beta (pre-release) versions
+        </label>
+      </div>
+      <div class="add-row" id="dirRow" style="margin-top:.45rem">
+        <span style="color:var(--muted);font-size:12px;flex:none">Folder</span>
+        <input type="text" id="newDir" aria-label="Install folder" style="height:31px;font-size:13px">
+        <button id="newDirBrowse" style="height:31px">Browse…</button>
+      </div>
+      <div class="row" id="dirSubRow" style="margin-top:.35rem; gap:.4rem">
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:12px;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="dirUseRepo" checked> <span id="dirUseRepoText">put it in a subfolder named after the app</span>
         </label>
       </div>
       <p class="helper" id="addHint">GitHub releases URL; the right download for this computer is selected automatically.</p>
@@ -237,6 +284,26 @@
         <button id="saveRoot">Save</button>
       </div>
       <p class="hint">Portable apps unzip into <code>&lt;folder&gt;/&lt;repo&gt;</code>.</p>
+      <div class="row" style="margin-top:.6rem;align-items:flex-start">
+        <span style="color:var(--muted);font-size:.9rem;min-width:8rem;padding-top:.4rem">Categories</span>
+        <div style="flex:1;min-width:12rem">
+          <div class="cat-list" id="catList"></div>
+          <div class="row">
+            <input type="text" id="newCatName" placeholder="Name, e.g. Games" style="width:10rem">
+            <input type="text" id="newCatDir" placeholder="Folder, e.g. C:\Games" style="flex:1;min-width:8rem">
+            <button id="newCatBrowse">Browse…</button>
+            <button id="addCat">Add</button>
+          </div>
+        </div>
+      </div>
+      <p class="hint">Each category has its own folder: its portable apps unzip into <code>&lt;category folder&gt;/&lt;repo&gt;</code>; apps with no category use the portable apps folder above. Moving an app to another category, or changing a category's folder, moves the app's files too.</p>
+      <div class="row" style="margin-top:.6rem">
+        <span style="color:var(--muted);font-size:.9rem;min-width:8rem">GitHub token</span>
+        <input type="password" id="ghToken" placeholder="github_pat_… or ghp_…" autocomplete="off" spellcheck="false" style="flex:1;min-width:12rem">
+        <button id="saveToken">Save</button>
+        <button id="clearToken" style="display:none">Remove</button>
+      </div>
+      <p class="hint" id="tokenHint">Optional. Without one GitHub allows 60 requests an hour per network; with one, 5,000. A fine-grained token with <b>Public repositories (read-only)</b> access and no other permissions is enough. Stored encrypted on this computer, never in config.json.</p>
       <div class="row" style="margin-top:.6rem">
         <span style="color:var(--muted);font-size:.9rem;min-width:8rem">Advanced</span>
         <button id="editJson">Edit config.json</button>
@@ -259,7 +326,7 @@
 </div>
 
 <script>
-let config = { portableRoot: '', repos: [] };
+let config = { portableRoot: '', repos: [], categories: [] };
 const st = {};       // appKey -> { ph, pct, from(current), to(available), reason, present }
 const selected = new Set();
 let busy = false;
@@ -268,10 +335,10 @@ let booted = false; // first window load done — guards the check-on-open from 
 const $ = (id) => document.getElementById(id);
 const keyOf = (r) => `${r.owner}/${r.repo}#${r.type}`;
 const msg = (t, cls) => { const m = $('msg'); m.textContent = t || ''; m.className = cls || ''; };
-const clean = (e) => String(e && e.message ? e.message : e).replace(/^Error:\s*/, '');
+const clean = (e) => String(e && e.message ? e.message : e).replace(/^Error invoking remote method '[^']+': /, '').replace(/^Error:\s*/, '');
 const selectedType = () => $('newType').querySelector('button.active').dataset.type;
 $('newType').querySelectorAll('button').forEach((b) =>
-  b.onclick = () => { $('newType').querySelectorAll('button').forEach((x) => x.classList.remove('active')); b.classList.add('active'); });
+  b.onclick = () => { $('newType').querySelectorAll('button').forEach((x) => x.classList.remove('active')); b.classList.add('active'); syncDirField(); });
 
 function parseRepo(s) {
   s = s.trim();
@@ -310,59 +377,149 @@ function primaryAction(s) {
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const cell = (node, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; if (node) td.appendChild(node); return td; };
 
+// Categories (Settings) — matched by name, case-insensitively, the same as the engine.
+const cats = () => config.categories || [];
+const findCat = (name) => (name ? cats().find((c) => c.name.toLowerCase() === String(name).toLowerCase()) : null);
+const catOf = (r) => findCat(r.category);
+// Where a portable app unpacks when it has no folder of its own: <category or portable folder>/<repo>.
+// The same join as the engine's resolvePortableDir: a backslash if the folder has one.
+const joinDir = (root, name) => `${root.replace(/[\\/]+$/, '')}${root.includes('\\') ? '\\' : '/'}${name}`;
+const defaultDir = (repo, cat) => { const root = cat ? cat.dir : config.portableRoot; return root && repo ? joinDir(root, repo) : ''; };
+const dirOf = (r) => (r.install && r.install.dir) || defaultDir(r.repo, catOf(r));
+
+// Collapsed groups are a view preference, so they live in this window's localStorage, not
+// in config.json. Keyed by lower-cased category name; '' is Uncategorized.
+const collapsed = new Set((() => { try { return JSON.parse(localStorage.getItem('collapsedGroups')) || []; } catch { return []; } })());
+const groupId = (cat) => (cat ? cat.name.toLowerCase() : '');
+function toggleGroup(id) {
+  collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+  try { localStorage.setItem('collapsedGroups', JSON.stringify([...collapsed])); } catch {}
+  renderRepos();
+}
+
+// --- drag to reorder: apps within their group, categories among each other ---
+// `info` is { kind: 'app'|'cat', group, item }; a drop is only accepted from the same kind
+// and group. List rows are draggable only while nothing runs, because progress updates
+// re-render the list and would pull the row out from under the drag.
+let drag = null;
+const clearDrop = () => document.querySelectorAll('.drop-before, .drop-after').forEach((n) => n.classList.remove('drop-before', 'drop-after'));
+function makeDraggable(node, info, onDrop) {
+  const accepts = () => drag && drag.kind === info.kind && drag.group === info.group && drag.item !== info.item;
+  node.draggable = true;
+  node.addEventListener('dragstart', (e) => {
+    if (e.target !== node) return; // a checkbox or button inside the row
+    drag = info; node.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', '');
+  });
+  node.addEventListener('dragend', () => { drag = null; node.classList.remove('dragging'); clearDrop(); });
+  node.addEventListener('dragover', (e) => {
+    if (!accepts()) return;
+    e.preventDefault();
+    const b = node.getBoundingClientRect();
+    const after = e.clientY > b.top + b.height / 2;
+    if (!node.classList.contains(after ? 'drop-after' : 'drop-before')) { clearDrop(); node.classList.add(after ? 'drop-after' : 'drop-before'); }
+  });
+  node.addEventListener('drop', (e) => {
+    if (!accepts()) return;
+    e.preventDefault();
+    const after = node.classList.contains('drop-after');
+    const moved = drag.item;
+    drag = null; clearDrop();
+    onDrop(moved, info.item, after);
+  });
+}
+// Moves `item` next to `target` in config[field] (repos or categories) and saves.
+async function reorder(field, item, target, after) {
+  const list = config[field].filter((x) => x !== item);
+  list.splice(list.indexOf(target) + (after ? 1 : 0), 0, item);
+  config[field] = list;
+  renderCats(); renderRepos();
+  await saveConfig();
+}
+
 function renderRepos() {
   const tb = $('rows');
   tb.innerHTML = '';
   $('empty').style.display = config.repos.length ? 'none' : '';
-  config.repos.forEach((r) => {
-    const key = keyOf(r);
-    const s = st[key] || (st[key] = { ph: 'idle' });
-    const row = el('div', 'app-row'); // 7 grid children, same template as the header
-
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = selected.has(key);
-    cb.onchange = () => { cb.checked ? selected.add(key) : selected.delete(key); syncBar(); };
-    row.appendChild(cb);
-
-    const appSpan = el('span', 'app-name', `${r.owner}/${r.repo}${r.prerelease ? ' β' : ''}`);
-    appSpan.title = `${r.owner}/${r.repo}` + (r.prerelease ? ' — tracking beta (pre-release) versions' : '');
-    row.appendChild(appSpan);
-    row.appendChild(el('span', 'type-cell badge ' + (r.type === 'installer' ? 'installer' : 'portable'), r.type === 'installer' ? 'Installer' : 'Portable'));
-
-    // Current
-    let cur;
-    if (s.ph === 'loading') cur = el('span', 'current-version ver dash', '…');
-    else if (s.from) { cur = el('span', 'current-version ver cur', s.from); cur.title = s.from; }
-    else if (s.present) { cur = el('span', 'current-version ver none', 'Unknown'); cur.title = 'Installed, but the version could not be detected.'; }
-    else cur = el('span', 'current-version ver none', 'Not installed');
-    row.appendChild(cur);
-
-    // Available
-    const av = s.to ? el('span', 'available-version ver avail', s.to) : el('span', 'available-version ver dash', '—');
-    if (s.to) av.title = s.to;
-    row.appendChild(av);
-
-    // Status
-    const sv = statusView(s);
-    const stTxt = el('span', 'txt', sv.text); stTxt.title = sv.text;
-    const stEl = el('span', 'status st ' + sv.cls); stEl.append(el('span', 'dot'), stTxt);
-    row.appendChild(stEl);
-
-    // Actions
-    const act = el('div', 'row-actions');
-    const runningFail = s.ph === 'failed' && /is running/.test(s.reason || '');
-    const label = runningFail ? 'Retry' : primaryAction(s);
-    const b = el('button', 'primary rowbtn', label); b.disabled = busy;
-    if (runningFail) b.title = 'Close the app and retry the update';
-    b.onclick = () => (runningFail ? closeAndRetry(r, key) : label === 'Check' ? checkApps([key]) : runBatch([key]));
-    act.appendChild(b);
-    const kb = el('button', 'kebab ghost', '⋯'); kb.title = 'More';
-    kb.onclick = (ev) => { ev.stopPropagation(); openMenu(r, kb); };
-    act.appendChild(kb);
-    row.appendChild(act);
-
-    tb.appendChild(row);
+  // With categories defined, rows are grouped under a header per category (folder shown),
+  // apps with no category first. Empty categories are left out of the list. A header
+  // click collapses its group; dragging a header reorders the categories.
+  const groups = [{ cat: null, repos: [] }, ...cats().map((c) => ({ cat: c, repos: [] }))];
+  config.repos.forEach((r) => { const c = catOf(r); (groups.find((g) => g.cat === c) || groups[0]).repos.push(r); });
+  groups.forEach((g) => {
+    if (!g.repos.length) return;
+    const id = groupId(g.cat);
+    const shut = cats().length > 0 && collapsed.has(id);
+    if (cats().length) {
+      const h = el('div', 'group-h' + (shut ? ' collapsed' : ''));
+      const dir = g.cat ? g.cat.dir : config.portableRoot;
+      const ups = g.repos.filter((r) => st[keyOf(r)]?.ph === 'available').length;
+      const n = el('span', 'n', `${g.repos.length} app${g.repos.length === 1 ? '' : 's'}`);
+      if (ups) n.append(' · ', el('span', 'up', `${ups} update${ups > 1 ? 's' : ''}`));
+      const dirEl = el('span', 'dir', dir || '');
+      if (dir) dirEl.title = dir;
+      h.append(el('span', 'chev', '▼'), el('span', 'name', g.cat ? g.cat.name : 'Uncategorized'), n, dirEl);
+      h.title = shut ? 'Show these apps' : 'Hide these apps';
+      h.onclick = () => toggleGroup(id);
+      if (g.cat && !busy) makeDraggable(h, { kind: 'cat', group: 'cats', item: g.cat }, (c, target, after) => reorder('categories', c, target, after));
+      tb.appendChild(h);
+    }
+    if (!shut) g.repos.forEach((r) => renderRow(r, id));
   });
   syncBar();
+}
+
+function renderRow(r, group) {
+  const tb = $('rows');
+  const key = keyOf(r);
+  const s = st[key] || (st[key] = { ph: 'idle' });
+  const row = el('div', 'app-row'); // 8 grid children, same template as the header
+  if (!busy) makeDraggable(row, { kind: 'app', group, item: r }, (x, target, after) => reorder('repos', x, target, after));
+
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = selected.has(key);
+  cb.onchange = () => { cb.checked ? selected.add(key) : selected.delete(key); syncBar(); };
+  row.appendChild(cb);
+
+  const appSpan = el('span', 'app-name', `${r.repo}${r.prerelease ? ' β' : ''}`);
+  appSpan.title = `${r.owner}/${r.repo}` + (r.prerelease ? ' — tracking beta (pre-release) versions' : '') + (r.type === 'portable' && dirOf(r) ? `\nFolder: ${dirOf(r)}` : '');
+  row.appendChild(appSpan);
+  const ownerSpan = el('span', 'owner owner-cell', r.owner); ownerSpan.title = r.owner;
+  row.appendChild(ownerSpan);
+  row.appendChild(el('span', 'type-cell badge ' + (r.type === 'installer' ? 'installer' : 'portable'), r.type === 'installer' ? 'Installer' : 'Portable'));
+
+  // Current
+  let cur;
+  if (s.ph === 'loading') cur = el('span', 'current-version ver dash', '…');
+  else if (s.from) { cur = el('span', 'current-version ver cur', s.from); cur.title = s.from; }
+  else if (s.present) { cur = el('span', 'current-version ver none', 'Unknown'); cur.title = 'Installed, but the version could not be detected.'; }
+  else cur = el('span', 'current-version ver none', 'Not installed');
+  row.appendChild(cur);
+
+  // Available
+  const av = s.to ? el('span', 'available-version ver avail', s.to) : el('span', 'available-version ver dash', '—');
+  if (s.to) av.title = s.to;
+  row.appendChild(av);
+
+  // Status
+  const sv = statusView(s);
+  const stTxt = el('span', 'txt', sv.text); stTxt.title = sv.text;
+  const stEl = el('span', 'status st ' + sv.cls); stEl.append(el('span', 'dot'), stTxt);
+  row.appendChild(stEl);
+
+  // Actions
+  const act = el('div', 'row-actions');
+  const runningFail = s.ph === 'failed' && /is running/.test(s.reason || '');
+  const label = runningFail ? 'Retry' : primaryAction(s);
+  const b = el('button', 'primary rowbtn', label); b.disabled = busy;
+  if (runningFail) b.title = 'Close the app and retry the update';
+  b.onclick = () => (runningFail ? closeAndRetry(r, key) : label === 'Check' ? checkApps([key]) : runBatch([key]));
+  act.appendChild(b);
+  const kb = el('button', 'kebab ghost', '⋯'); kb.title = 'More';
+  kb.onclick = (ev) => { ev.stopPropagation(); openMenu(r, kb); };
+  act.appendChild(kb);
+  row.appendChild(act);
+
+  tb.appendChild(row);
 }
 
 function syncBar() {
@@ -403,6 +560,9 @@ function openMenu(r, anchor) {
   if (r.type === 'portable') item('Open folder', () => window.api.openFolder(key));
   sep();
   item('Edit…', () => startEdit(r));
+  const cur = catOf(r);
+  cats().filter((c) => c !== cur).forEach((c) => item(`Move to ${c.name}`, () => moveToCategory(r, c.name)));
+  if (cur) item('Remove from category', () => moveToCategory(r, null));
   item('Close app & update', () => closeAndRetry(r, key));
   item('Force reinstall', () => { if (confirm(`Reinstall ${r.owner}/${r.repo} even if it's up to date?`)) runBatch([key], true); });
   sep();
@@ -419,10 +579,97 @@ function openMenu(r, anchor) {
 }
 
 // --- config ops ---
+// Returns the save result ({ moved, notes } — app folders that followed a category
+// change), or null after a failure. A failed save changed nothing on disk, so the
+// renderer's copy is put back from config.json rather than left out of step with it.
 async function saveConfig() {
   config.portableRoot = $('portableRoot').value.trim();
-  try { await window.api.saveConfig(config); } catch (e) { msg(clean(e), 'bad'); }
+  try { return await window.api.saveConfig(config); }
+  catch (e) {
+    msg(clean(e), 'bad');
+    try { config = await window.api.getConfig(); if (!config.repos) config.repos = []; renderCats(); renderRepos(); } catch {}
+    return null;
+  }
 }
+// Said whenever a save moved files, so that never happens silently.
+function movedText(res) {
+  const parts = ((res && res.moved) || []).map((m) => `Moved ${m.from} to ${m.to}.`).concat((res && res.notes) || []);
+  return parts.join(' ');
+}
+async function afterMove(res, okText) {
+  if (!res) return false;
+  config = await window.api.getConfig(); if (!config.repos) config.repos = []; // main may drop a stale install.dir
+  msg([okText, movedText(res)].filter(Boolean).join(' '), res.notes && res.notes.length ? 'info' : 'ok');
+  renderCats(); renderRepos(); // regroup now; the installed-version scan below is slow
+  await refreshInstalled(); renderRepos();
+  return true;
+}
+async function moveToCategory(r, name) {
+  if (busy) return msg('Wait for the current check or update to finish.', 'bad');
+  const entry = config.repos.find((x) => keyOf(x) === keyOf(r));
+  if (!entry) return;
+  if (name) entry.category = findCat(name).name; else delete entry.category;
+  if (entry.type === 'portable') msg(`Moving ${r.repo}…`, 'info');
+  await afterMove(await saveConfig(), name ? `${r.repo} is now in ${entry.category}.` : `${r.repo} is no longer in a category.`);
+}
+
+function renderCats() {
+  const list = $('catList');
+  list.innerHTML = '';
+  cats().forEach((c) => {
+    const n = config.repos.filter((r) => catOf(r) === c).length;
+    const row = el('div', 'cat-item');
+    makeDraggable(row, { kind: 'cat', group: 'cats', item: c }, (x, target, after) => reorder('categories', x, target, after));
+    const dir = el('span', 'dir', c.dir); dir.title = c.dir;
+    row.append(el('span', 'name', c.name), dir, el('span', 'n', `${n} app${n === 1 ? '' : 's'}`));
+    const ch = el('button', null, 'Change folder…');
+    ch.onclick = async () => {
+      if (busy) return msg('Wait for the current check or update to finish.', 'bad');
+      let p;
+      try { ({ path: p } = await window.api.pickFolder(`Select the folder for ${c.name}`, c.dir)); } catch (e) { return msg(clean(e), 'bad'); }
+      if (!p) return;
+      c.dir = p;
+      if (n) msg(`Moving ${c.name} apps…`, 'info');
+      await afterMove(await saveConfig(), `${c.name} now uses ${p}.`);
+    };
+    const rm = el('button', 'ghost', 'Remove');
+    rm.onclick = async () => {
+      if (n) return msg(`Move the ${n} app${n === 1 ? '' : 's'} in ${c.name} to another category first.`, 'bad');
+      if (!confirm(`Remove the ${c.name} category?`)) return;
+      config.categories = cats().filter((x) => x !== c);
+      if (await saveConfig()) { msg('Saved.', 'ok'); renderCats(); renderRepos(); }
+    };
+    row.append(ch, rm);
+    list.appendChild(row);
+  });
+  // The add-app picker, kept to the current list. Hidden until a category exists.
+  const sel = $('newCat');
+  const keep = findCat(sel.value);
+  sel.innerHTML = '';
+  sel.appendChild(new Option('No category', ''));
+  cats().forEach((c) => sel.appendChild(new Option(c.name, c.name)));
+  sel.value = keep ? keep.name : '';
+  sel.style.display = cats().length ? '' : 'none';
+  syncDirField();
+}
+$('newCatBrowse').onclick = async () => {
+  try { const { path: p } = await window.api.pickFolder('Select the category folder'); if (p) $('newCatDir').value = p; }
+  catch (e) { msg(clean(e), 'bad'); }
+};
+$('addCat').onclick = async () => {
+  const name = $('newCatName').value.trim();
+  const dir = $('newCatDir').value.trim();
+  if (!name) return msg('Give the category a name.', 'bad');
+  if (!dir) return msg(`Choose a folder for ${name}.`, 'bad');
+  if (findCat(name)) return msg(`There is already a ${findCat(name).name} category.`, 'bad');
+  config.categories = [...cats(), { name, dir }];
+  if (await saveConfig()) {
+    $('newCatName').value = ''; $('newCatDir').value = '';
+    msg(`Added ${name}. Choose it when adding an app, or use ⋯ → Move to ${name}.`, 'ok');
+    renderCats(); renderRepos();
+  }
+};
+['newCatName', 'newCatDir'].forEach((id) => $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') $('addCat').click(); }));
 async function refreshInstalled() {
   try {
     const inst = await window.api.getInstalled();
@@ -436,6 +683,7 @@ async function load() {
   $('portableRoot').value = config.portableRoot || '';
   $('selfPreRel').checked = !!config.selfUpdatePrerelease;
   $('checkOnOpen').checked = !!config.checkOnOpen;
+  renderCats();
   config.repos.forEach((r) => { st[keyOf(r)] = { ph: 'loading' }; }); // show rows instantly
   renderRepos();
   await refreshInstalled(); // slower registry/manifest detection
@@ -460,6 +708,38 @@ async function load() {
   }
 }
 
+// GitHub token: the renderer only ever sends a new token in; status comes back as
+// saved/not-saved plus the quota, never the token itself.
+const TOKEN_HELP = $('tokenHint').innerHTML;
+async function refreshToken() {
+  try {
+    const { saved, unreadable, env, quota } = await window.api.tokenStatus();
+    $('clearToken').style.display = saved || unreadable ? '' : 'none';
+    $('ghToken').placeholder = saved ? 'Saved — paste a new token to replace it' : 'github_pat_… or ghp_…';
+    const q = quota && !quota.error && quota.limit ? ` ${quota.remaining}/${quota.limit} requests left this hour.` : '';
+    if (saved) $('tokenHint').textContent = `Token saved.${q}`;
+    else if (unreadable) $('tokenHint').textContent = `The saved token could not be read on this computer and is not being used — paste it again.${q}`;
+    else if (env) $('tokenHint').textContent = `Using the GITHUB_TOKEN environment variable.${q}`;
+    else $('tokenHint').innerHTML = TOKEN_HELP + (q ? ` Now:${q}` : '');
+  } catch {}
+}
+$('saveToken').onclick = async () => {
+  const t = $('ghToken').value.trim();
+  if (!t) return msg('Paste a GitHub token first.', 'bad');
+  $('saveToken').disabled = true;
+  msg('Checking token with GitHub…', 'info');
+  try { await window.api.setToken(t); $('ghToken').value = ''; msg('Token saved.', 'ok'); await refreshToken(); }
+  catch (e) { msg(`Token not saved — ${clean(e)}`, 'bad'); }
+  finally { $('saveToken').disabled = false; }
+};
+$('ghToken').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('saveToken').click(); });
+$('clearToken').onclick = async () => {
+  if (!confirm('Remove the saved GitHub token?')) return;
+  try { await window.api.clearToken(); msg('Token removed.', 'ok'); await refreshToken(); } catch (e) { msg(clean(e), 'bad'); }
+};
+// Quota is fetched when Settings is opened (the /rate_limit call is free) — not at startup.
+$('settings').addEventListener('toggle', () => { if ($('settings').open) refreshToken(); });
+
 $('saveRoot').onclick = () => saveConfig().then(() => { msg('Saved.', 'ok'); refreshInstalled().then(renderRepos); });
 $('selfPreRel').onchange = () => { config.selfUpdatePrerelease = $('selfPreRel').checked; saveConfig().then(() => msg('Saved.', 'ok')); };
 $('checkOnOpen').onchange = () => { config.checkOnOpen = $('checkOnOpen').checked; saveConfig().then(() => msg('Saved.', 'ok')); };
@@ -469,16 +749,53 @@ $('browse').onclick = async () => {
 };
 let editingKey = null;
 const ADD_HINT = 'Paste a GitHub releases URL; git-updater selects the right download for this computer automatically.';
-function setTypeToggle(type) { $('newType').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.type === type)); }
+function setTypeToggle(type) { $('newType').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.type === type)); syncDirField(); }
+
+// The per-app folder: portable only. Empty means the default, which the placeholder spells
+// out. With the subfolder box ticked (the default) the folder chosen is where the app's own
+// <repo> folder goes, the same way a category folder works; unticked, the app unpacks
+// straight into it.
+const chosenDir = (repo) => { const v = $('newDir').value.trim(); return v && $('dirUseRepo').checked ? joinDir(v, repo) : v; };
+function syncDirField() {
+  const portable = selectedType() === 'portable';
+  $('dirRow').style.display = portable ? '' : 'none';
+  $('dirSubRow').style.display = portable && $('newDir').value.trim() ? '' : 'none';
+  const parsed = parseRepo($('newRepo').value);
+  const repo = parsed ? parsed.repo : '<repo>';
+  const def = defaultDir(repo, findCat($('newCat').value));
+  $('newDir').placeholder = def ? `Default: ${def}` : 'Choose a folder, or set the portable apps folder in Settings';
+  $('newDir').title = 'The folder this app goes in. Leave empty to use the default' + (def ? ` (${def}).` : '.');
+  $('dirUseRepoText').textContent = `put it in a subfolder named ${repo} (installs to ${chosenDir(repo)})`;
+}
+$('newRepo').addEventListener('input', syncDirField);
+$('newCat').addEventListener('change', syncDirField);
+$('newDir').addEventListener('input', syncDirField);
+$('dirUseRepo').addEventListener('change', syncDirField);
+// Opens where the app would go now: the folder typed in, else its category's (or the
+// portable apps) folder.
+$('newDirBrowse').onclick = async () => {
+  const start = $('newDir').value.trim() || (findCat($('newCat').value) || {}).dir || config.portableRoot || '';
+  try { const { path: p } = await window.api.pickFolder('Select the folder for this app', start); if (p) { $('newDir').value = p; syncDirField(); } }
+  catch (e) { msg(clean(e), 'bad'); }
+};
+$('newDir').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('addRepo').click(); if (e.key === 'Escape' && editingKey) cancelEdit(); });
 
 function startEdit(r) {
   editingKey = keyOf(r);
   $('newRepo').value = `${r.owner}/${r.repo}`;
   setTypeToggle(r.type);
   $('preRel').checked = !!r.prerelease;
+  $('newCat').value = catOf(r) ? catOf(r).name : '';
+  // A folder ending in the repo's own name shows as its parent with the subfolder box ticked.
+  const pin = ((r.install && r.install.dir) || '').replace(/[\\/]+$/, '');
+  const m = /^(.+)[\\/]([^\\/]+)$/.exec(pin);
+  const sub = !!m && m[2].toLowerCase() === r.repo.toLowerCase();
+  $('newDir').value = sub ? m[1] : pin;
+  $('dirUseRepo').checked = sub || !pin;
+  syncDirField();
   $('addRepo').textContent = 'Save';
   $('cancelEdit').style.display = '';
-  $('addHint').textContent = `Editing ${r.owner}/${r.repo} — change the repo or type, then Save.`;
+  $('addHint').textContent = `Editing ${r.owner}/${r.repo} — change the repo, type, category or folder, then Save. A new folder moves the app's files there.`;
   $('newRepo').focus();
   $('newRepo').scrollIntoView({ block: 'nearest' });
 }
@@ -488,6 +805,10 @@ function cancelEdit() {
   $('addRepo').textContent = 'Add app';
   $('cancelEdit').style.display = 'none';
   $('preRel').checked = false;
+  $('newCat').value = '';
+  $('newDir').value = '';
+  $('dirUseRepo').checked = true;
+  syncDirField();
   $('addHint').textContent = ADD_HINT;
   msg('', '');
 }
@@ -499,32 +820,50 @@ $('addRepo').onclick = async () => {
   const parsed = parseRepo($('newRepo').value);
   if (!parsed) return msg('Paste a GitHub releases URL or owner/repo.', 'bad');
   const type = selectedType();
-  if (type === 'portable' && !$('portableRoot').value.trim()) { $('settings').open = true; return msg('Set the portable apps folder first — see Settings.', 'bad'); }
+  const category = $('newCat').value || null;
+  const dir = type === 'portable' ? chosenDir(parsed.repo) : '';
+  if (type === 'portable' && !category && !dir && !$('portableRoot').value.trim()) { $('settings').open = true; return msg('Set the portable apps folder first — see Settings.', 'bad'); }
   const dup = config.repos.some((r) => r.owner === parsed.owner && r.repo === parsed.repo && r.type === type && keyOf(r) !== editingKey);
   if (dup) return msg(`${parsed.owner}/${parsed.repo} (${type}) is already in your list.`, 'bad');
+  // An edit that only changes the category or folder asks GitHub nothing: same release, same
+  // row state. That also lets it save while a check is running.
+  let entry = editingKey && config.repos.find((r) => keyOf(r) === editingKey);
+  const newKey = `${parsed.owner}/${parsed.repo}#${type}`;
+  const sameRelease = !!entry && newKey === editingKey && !!entry.prerelease === $('preRel').checked;
+  if (!sameRelease && busy) return msg('Wait for the current check or update to finish.', 'bad');
 
-  $('addRepo').disabled = true;
-  msg(`Checking ${parsed.owner}/${parsed.repo}…`, 'info');
-  try {
-    await window.api.validateRepo(parsed.owner, parsed.repo, $('preRel').checked);
-  } catch (e) {
+  if (!sameRelease) {
+    $('addRepo').disabled = true;
+    msg(`Checking ${parsed.owner}/${parsed.repo}…`, 'info');
+    try {
+      await window.api.validateRepo(parsed.owner, parsed.repo, $('preRel').checked);
+    } catch (e) {
+      $('addRepo').disabled = false;
+      return msg(`Can't ${editingKey ? 'save' : 'add'} ${parsed.owner}/${parsed.repo} — ${clean(e)}. Check the owner/repo.`, 'bad');
+    }
     $('addRepo').disabled = false;
-    return msg(`Can't ${editingKey ? 'save' : 'add'} ${parsed.owner}/${parsed.repo} — ${clean(e)}. Check the owner/repo.`, 'bad');
   }
-  $('addRepo').disabled = false;
 
-  if (editingKey) { // replace the edited entry
-    delete st[editingKey]; selected.delete(editingKey);
-    config.repos = config.repos.filter((r) => keyOf(r) !== editingKey);
+  // An edit changes the entry in place, so it keeps its position in the list and any
+  // overrides set by hand in config.json (asset pattern, tag prefix, installer args, …).
+  if (entry) {
+    if (!sameRelease) { delete st[editingKey]; selected.delete(editingKey); }
+    Object.assign(entry, { owner: parsed.owner, repo: parsed.repo, type });
+  } else {
+    entry = { owner: parsed.owner, repo: parsed.repo, type };
+    config.repos.push(entry);
   }
-  const entry = { owner: parsed.owner, repo: parsed.repo, type };
-  if ($('preRel').checked) entry.prerelease = true;
-  config.repos.push(entry);
+  if ($('preRel').checked) entry.prerelease = true; else delete entry.prerelease;
+  if (category) entry.category = category; else delete entry.category;
+  if (dir) entry.install = { ...(entry.install || {}), dir };
+  else if (type === 'portable' && entry.install) {
+    delete entry.install.dir;
+    if (!Object.keys(entry.install).length) delete entry.install;
+  }
   const wasEditing = !!editingKey;
   cancelEdit();
-  msg(wasEditing ? 'Saved.' : 'Added.', 'ok');
-  await saveConfig(); await refreshInstalled(); renderRepos();
-  checkApps([`${parsed.owner}/${parsed.repo}#${type}`]); // populate available for the new/edited entry
+  if (!(await afterMove(await saveConfig(), wasEditing ? 'Saved.' : 'Added.'))) return;
+  if (!sameRelease) checkApps([newKey]); // populate available for the new/edited entry
 };
 $('newRepo').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('addRepo').click(); if (e.key === 'Escape' && editingKey) cancelEdit(); });
 async function removeRepo(r) {
@@ -574,6 +913,7 @@ async function checkApps(keys) {
   if (busy) return;
   busy = true; keys.forEach((k) => (st[k] = { ...(st[k] || {}), ph: 'checking' })); renderRepos();
   const retyped = { portable: [], installer: [] }; // type corrections — reported, never silent
+  let stopped = null; // rate-limit / bad-token reason that ended the run early
   try {
     for (const k of keys) {
       const { results } = await window.api.check({ only: k });
@@ -585,6 +925,13 @@ async function checkApps(keys) {
         else st[k] = { ...s, ph: r.status === 'current' ? 'current' : 'available', from: r.from || s.from, to: r.to, present: s.present };
       }
       renderRepos();
+      // Rate-limited (or a bad token): every remaining call would fail the same way and
+      // only burn more of the quota. Stop here and say why once.
+      if (r && r.stopRun) {
+        keys.slice(keys.indexOf(k) + 1).forEach((x) => (st[x] = { ...(st[x] || {}), ph: 'failed', reason: r.reason }));
+        stopped = r.reason;
+        break;
+      }
     }
     // Say what changed AND what it means. Going portable, a copy sits beside whatever the
     // system package manager already installed rather than replacing it. Going installer,
@@ -599,7 +946,8 @@ async function checkApps(keys) {
       parts.push(
         `${retyped.installer.join(', ')} switched to Installer — ${retyped.installer.length > 1 ? 'these publish' : 'this publishes'} no portable build, so updates install system-wide and will ask for authorization.`
       );
-    msg(parts.length ? `Check complete. ${parts.join(' ')}` : 'Check complete.', 'ok');
+    if (stopped) msg(parts.length ? `${stopped} ${parts.join(' ')}` : stopped, 'bad');
+    else msg(parts.length ? `Check complete. ${parts.join(' ')}` : 'Check complete.', 'ok');
   } catch (e) { keys.forEach((k) => (st[k] = { ...(st[k] || {}), ph: 'failed', reason: clean(e) })); msg(clean(e), 'bad'); }
   finally { busy = false; renderRepos(); }
 }
@@ -620,6 +968,11 @@ async function runBatch(keys, force) {
       else if (r.status === 'current') { st[k] = { ...s, ph: 'current', to: r.to }; }
       else if (/installer window opened/.test(r.reason || '')) { st[k] = { ...s, ph: 'waiting', to: r.to }; watchInstall(k, s.from); }
       else { st[k] = { ...s, ph: 'failed', reason: r.reason }; failed++; }
+      if (r && r.stopRun) { // same as checkApps: the rest would only fail the same way
+        keys.slice(keys.indexOf(k) + 1).forEach((x) => { st[x] = { ...(st[x] || {}), ph: 'failed', reason: r.reason }; failed++; });
+        renderRepos();
+        break;
+      }
     } catch (e) { st[k] = { ...(st[k] || {}), ph: 'failed', reason: clean(e) }; failed++; }
     renderRepos();
   }

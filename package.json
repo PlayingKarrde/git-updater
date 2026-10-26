@@ -77,7 +77,7 @@
       "publish": [
         {
           "provider": "github",
-          "owner": "TeeJS",
+          "owner": "PlayingKarrde",
           "repo": "git-updater"
         }
       ]

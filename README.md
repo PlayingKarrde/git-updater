@@ -11,7 +11,7 @@ services, no store — just your list and GitHub.
 
 ## Get it
 
-Grab the build for your machine from **[Releases](https://github.com/TeeJS/git-updater/releases)**.
+Grab the build for your machine from **[Releases](https://github.com/PlayingKarrde/git-updater/releases)**.
 
 | | Download | Run it |
 |---|---|---|
@@ -91,6 +91,15 @@ the thing being replaced.
 
 Prefer beta builds for a specific app? Tick *include beta (pre-release) versions* when
 adding it.
+
+Want games in `C:\Games` and everything else in `C:\Apps`? Add a **category** in Settings
+with its own folder, then pick it when adding an app (or ⋯ → *Move to …*). The list groups
+apps by category, and moving an app between categories moves its folder too.
+Click a category's header to collapse it, and drag apps or categories to reorder them.
+
+Want one app somewhere else entirely? ⋯ → *Edit…* and set its **Folder**; leave it empty to
+use the default. By default the app gets its own subfolder named after it inside the folder
+you pick; untick that to unpack straight into it. Changing it moves the app's files there.
 
 ## On the open-quake panel
 
