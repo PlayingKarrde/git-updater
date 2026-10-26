@@ -1,0 +1,172 @@
+# Builds Windows, macOS and Linux on their own runners and publishes one GitHub release.
+#
+# Release: bump the version (docs/RELEASING.md §0), push main, then push a matching tag:
+#   git tag vX.Y.Z && git push origin vX.Y.Z
+# A tag with a suffix (v0.3.0-beta.1) is published as a prerelease, so only the self-update
+# beta channel sees it. Running the workflow by hand (Actions → Release → Run workflow) builds
+# all three platforms and keeps the files as workflow artifacts without releasing anything.
+#
+# Signing is optional and per platform, as in docs/RELEASING.md:
+# - Windows: sign.js needs a local Azure Trusted Signing setup, which a runner does not have,
+#   so CI builds are unsigned (SmartScreen will warn on first launch).
+# - macOS: notarized when these repository secrets are set, otherwise unnotarized:
+#     MAC_CERT_P12           base64 of a "Developer ID Application" certificate exported as .p12
+#     MAC_CERT_PASSWORD      that .p12's password
+#     APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   notarytool credentials
+#   Without them build/verify-mac-build.js is told to accept the unnotarized app
+#   (GITUPDATER_ALLOW_UNNOTARIZED), and the release notes say how to open it.
+# - Linux: never signed.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
+          # A tag that disagrees with package.json would publish files named for one version
+          # under a release named for another.
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version (expected v$version)"
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: check
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            flag: --win
+            files: |
+              dist/git-updater-*-x64.zip
+              dist/git-updater-*-arm64.zip
+          - name: macos
+            os: macos-latest
+            flag: --mac
+            # latest-mac.yml and the .zip.blockmap feed the Squirrel.Mac self-updater.
+            files: |
+              dist/git-updater-*-mac-arm64.dmg
+              dist/git-updater-*-mac-arm64.zip
+              dist/git-updater-*-mac-arm64.zip.blockmap
+              dist/latest-mac.yml
+          - name: linux
+            os: ubuntu-latest
+            flag: --linux
+            files: |
+              dist/git-updater-*-linux-*.tar.gz
+              dist/git-updater-*-linux-*.AppImage
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_MAC_SIGNING: ${{ secrets.MAC_CERT_P12 != '' && secrets.APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+      - name: Import Developer ID certificate
+        if: matrix.name == 'macos' && env.HAS_MAC_SIGNING == 'true'
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          kc_pass=$(openssl rand -hex 16)
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kc_pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kc_pass" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kc_pass" "$keychain"
+          # On the search list, so both electron-builder and build/notarize-dmg.js find it.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Mark macOS build as unnotarized
+        if: matrix.name == 'macos' && env.HAS_MAC_SIGNING != 'true'
+        run: |
+          echo "::warning::No Apple signing secrets set, so the macOS build is not notarized"
+          echo "GITUPDATER_ALLOW_UNNOTARIZED=1" >> "$GITHUB_ENV"
+          echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+
+      - name: Build
+        # --publish never: the release job below uploads, so a half-finished matrix never
+        # leaves a partial release behind.
+        run: npx electron-builder ${{ matrix.flag }} --publish never
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [check, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      HAS_MAC_SIGNING: ${{ secrets.MAC_CERT_P12 != '' && secrets.APPLE_ID != '' }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          merge-multiple: true
+      - run: ls -l assets
+
+      - name: Write release notes
+        run: |
+          {
+            echo "Downloads: \`git-updater-*-x64.zip\` / \`-arm64.zip\` for Windows, \`-mac-arm64.dmg\` for macOS (Apple Silicon), \`-linux-*.tar.gz\` or \`.AppImage\` for Linux."
+            echo
+            echo "The Windows build is not code-signed, so SmartScreen may warn the first time it runs."
+            if [[ "$HAS_MAC_SIGNING" != "true" ]]; then
+              echo
+              echo "The macOS build is not notarized. After copying it to Applications, run \`xattr -dr com.apple.quarantine /Applications/git-updater.app\` once so macOS will open it. It also cannot update itself, so download new versions from this page."
+            fi
+          } > notes.md
+
+      - name: Create release
+        # Drafted first and published once every file is attached, so nobody downloads a
+        # release that is still missing a platform.
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "$TAG" --notes-file notes.md --generate-notes
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" assets/*
+          if [[ "${{ needs.check.outputs.prerelease }}" == "true" ]]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi

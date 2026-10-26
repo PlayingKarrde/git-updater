@@ -18,9 +18,26 @@ which credentials, which commands.
 
 macOS **cannot** be signed or notarized off a Mac (`codesign`, `xcrun notarytool`,
 `stapler` are macOS-only), and Linux's AppImage packaging won't cross-build reliably from
-Windows — so each platform is built on its own host. The eventual one-command path is CI
-(a `windows-latest` + `macos-latest` + `ubuntu-latest` matrix); until that exists, follow
-the steps below.
+Windows — so each platform is built on its own host.
+
+## CI release (the usual path)
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs that matrix on
+`windows-latest`, `macos-latest` and `ubuntu-latest`. Bump the version (§0), push `main`, then
+push the matching tag:
+
+```bash
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The workflow refuses a tag that does not match `package.json`, runs the tests on every
+platform, builds, and publishes one release with all three platforms' files attached (a
+`-beta.N` tag publishes as a prerelease). Running it by hand from the Actions tab builds
+without releasing. CI builds are unsigned on Windows, and on macOS unless the Apple secrets
+listed at the top of the workflow are set; the release notes then say how to open the mac app.
+
+The manual steps below are for a signed build from a machine that holds the credentials.
 
 Each build's signing hook **degrades gracefully**: with no credentials it produces an
 *unsigned* artifact rather than failing — except macOS, where the guard (below) fails the
