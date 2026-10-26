@@ -11,7 +11,7 @@ services, no store — just your list and GitHub.
 
 ## Get it
 
-Grab the build for your machine from **[Releases](https://github.com/TeeJS/git-updater/releases)**.
+Grab the build for your machine from **[Releases](https://github.com/PlayingKarrde/git-updater/releases)**.
 
 | | Download | Run it |
 |---|---|---|
