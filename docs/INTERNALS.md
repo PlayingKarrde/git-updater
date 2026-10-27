@@ -254,7 +254,7 @@ node bin/watch.js list-assets owner/repo    # inspect a release's assets
 dlib, silent auth from the local `Connect-AzAccount` session). Machines without the `.signing/`
 setup build unsigned with a warning.
 
-`npm run dist:mac` produces `.dmg` and `.zip` for x64 and arm64, Developer ID signed with the
+`npm run dist:mac` produces `.dmg` and `.zip` for arm64, Developer ID signed with the
 hardened runtime and `build/entitlements.mac.plist`, then notarized via notarytool.
 
 Notarization only runs when one of three credential sets is in the environment: `APPLE_API_KEY`
