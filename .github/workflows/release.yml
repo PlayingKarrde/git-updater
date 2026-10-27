@@ -44,7 +44,7 @@ jobs:
           # A tag that disagrees with package.json would publish files named for one version
           # under a release named for another.
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version (expected v$version)"
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version. Bump the version (docs/RELEASING.md §0), push main, then move the tag to that commit."
             exit 1
           fi
 

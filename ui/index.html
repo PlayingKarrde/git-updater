@@ -1032,8 +1032,8 @@ async function selfCheck() {
     $('selfupText').textContent = `git-updater ${u.version} is available.`;
     const btn = $('selfupBtn');
     btn.style.display = ''; // a prior "up to date" render may have hidden it
-    // canApply is false on macOS, where a running .app bundle cannot be replaced in
-    // place. The new version is still reported; the button just sends the user to the
+    // canApply is false when this build cannot replace itself (a macOS build that is not
+    // notarized). The new version is still reported; the button just sends the user to the
     // release page to download it instead of applying it here.
     const applies = u.canApply !== false;
     btn.textContent = applies ? 'Update' : 'Download';

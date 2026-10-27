@@ -524,7 +524,7 @@ ipcMain.handle('selfupdate:check', async () => {
       // macOS applies in place via Squirrel.Mac (electron-updater), reading latest-mac.yml off
       // our GitHub releases — so what the banner reports is exactly what will install.
       const found = await macupdate.check({ prerelease });
-      return found ? { version: found.version, canApply: true } : null;
+      return found ? { version: found.version, canApply: found.canApply } : null;
     }
     const found = await selfupdate.checkForUpdate(app.getVersion(), { prerelease });
     return found ? { version: found.version, canApply: selfupdate.canApply() } : null;
@@ -673,9 +673,8 @@ ipcMain.handle('selfupdate:apply', async (e) => {
     return { relaunching: true, version: tag };
   } catch (e) {
     log(`self-update FAILED: ${e && e.stack ? e.stack : e}`);
+    updating = false; // a success keeps the guard up until this process exits
     throw e;
-  } finally {
-    updating = false; // only reached on a failure before the relaunch was started
   }
 });
 

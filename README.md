@@ -20,8 +20,9 @@ Grab the build for your machine from **[Releases](https://github.com/PlayingKarr
 | **Linux** | `git-updater-<v>-linux-<arch>.tar.gz` (x64, arm64) | extract anywhere, run `git-updater` |
 
 No setup, no admin rights, no background service, and closing the window exits everything.
-Windows builds are Authenticode-signed (Thomas Schmitz, via Azure Trusted Signing); macOS
-builds are Developer ID signed and notarized.
+Release builds are made by GitHub Actions. They are not code-signed, so Windows SmartScreen
+may warn the first time you run one, and macOS needs the step in the release notes before it
+will open the app.
 
 **On macOS, only notarized apps will run** — see [below](#on-macos).
 

@@ -16,8 +16,30 @@
 // Loaded only on macOS — electron/main.js does `require('./macupdate')` behind an IS_MAC
 // guard, so electron-updater never loads on Windows or Linux.
 
+const path = require('path');
+const { execFileSync } = require('child_process');
 const selfupdate = require('../src/selfupdate');
 const { log } = require('../src/log');
+
+// Squirrel.Mac only accepts a new bundle that satisfies the RUNNING app's designated
+// requirement. An unsigned or ad-hoc build (a CI release made without the Apple secrets)
+// has a requirement no other build can meet, so the download would finish and then fail.
+// Such a build reports updates with a Download button instead — the same check
+// build/verify-mac-build.js applies, asked of the bundle that is running. Memoized: the
+// running bundle cannot change underneath this process.
+let _canApply = null;
+function canApply() {
+  if (_canApply !== null) return _canApply;
+  const bundle = path.resolve(process.execPath, '..', '..', '..'); // <x>.app/Contents/MacOS/<exe>
+  try {
+    execFileSync('codesign', ['--test-requirement==notarized', '--verify', '--strict', bundle], { stdio: 'ignore' });
+    _canApply = true;
+  } catch {
+    _canApply = false;
+    log('self-update(mac): this build is not notarized, so updates are offered as downloads');
+  }
+  return _canApply;
+}
 
 // electron-updater expects an electron-log-style logger (info/warn/error). Route it to our
 // own append-only file log so a failed update leaves a trail in the same place as everything
@@ -57,7 +79,7 @@ async function check(opts = {}) {
   const result = await autoUpdater.checkForUpdates();
   if (!isNewer(result)) return null;
   const version = result.updateInfo && result.updateInfo.version;
-  return version ? { version } : null;
+  return version ? { version, canApply: canApply() } : null;
 }
 
 // Download the newer release and, once it is staged, hand off to Squirrel.Mac to swap the
@@ -68,6 +90,7 @@ async function check(opts = {}) {
 // so the renderer can show "Restarting into X…", exactly like the Windows/Linux handler
 // returns { relaunching } before its process exits. quitAndInstall then fires on a short timer.
 function apply({ onProgress, prerelease } = {}) {
+  if (!canApply()) return Promise.reject(new Error('this build is not notarized, so it cannot update itself — download the new version instead'));
   const autoUpdater = updater();
   autoUpdater.allowPrerelease = !!prerelease; // must match check()'s channel, or apply re-checks to a different release
   return new Promise((resolve, reject) => {
