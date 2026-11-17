@@ -80,6 +80,9 @@ function checkConfig(cfg) {
   cfg.repos.forEach((r, i) => {
     if (!r.owner || !r.repo) throw new Error(`app ${i + 1}: owner and repo are required`);
     if (r.type !== 'portable' && r.type !== 'installer') throw new Error(`app ${i + 1}: type must be portable or installer`);
+    if (r.asset != null) {
+      try { core.compilePattern(r.asset); } catch (e) { throw new Error(`app ${i + 1}: download pattern is not valid (${e.message})`); }
+    }
   });
   core.validateCategories(cfg);
 }
@@ -503,13 +506,48 @@ ipcMain.handle('repo:validate', async (_e, { owner, repo, prerelease }) => {
 ipcMain.handle('release:open', (_e, { owner, repo }) =>
   shell.openExternal(`https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`)
 );
-// Preview which Windows asset auto-pick would choose for the latest release.
-ipcMain.handle('asset:preview', async (_e, appKey) => {
+// Preview which asset an update would install from the latest release — the same
+// resolution the runner uses (saved pattern, else auto-pick with flavor and distro).
+const repoByKey = (appKey) => {
   const repo = readConfig().repos.find((r) => `${r.owner}/${r.repo}#${r.type}` === appKey);
   if (!repo) throw new Error('app not found');
-  const rel = await github.getLatestRelease(repo.owner, repo.repo, { prerelease: repo.prerelease, tagPrefix: repo.tagPrefix });
-  const asset = repo.asset ? core.matchAsset(rel.assets, repo.asset) : core.pickAsset(rel.assets, repo.type);
-  return { tag: rel.tag_name, asset: asset.name };
+  return repo;
+};
+const latestFor = (repo) =>
+  github.getLatestRelease(repo.owner, repo.repo, { prerelease: repo.prerelease, tagPrefix: repo.tagPrefix });
+const flavorFor = async (repo) =>
+  repo.type === 'installer' ? detect.installedFlavor(repo.detect || repo.repo).catch(() => null) : null;
+ipcMain.handle('asset:preview', async (_e, appKey) => {
+  const repo = repoByKey(appKey);
+  const rel = await latestFor(repo);
+  const asset = core.resolveAsset(repo, rel.assets, await flavorFor(repo), null, detect.osRelease());
+  return { tag: rel.tag_name, asset: asset.name, pinned: !!repo.asset };
+});
+// Everything the chooser shows: each file in the latest release, classified for this
+// platform and the app's type, plus the pattern each one would be remembered as.
+ipcMain.handle('asset:choices', async (_e, appKey) => {
+  const repo = repoByKey(appKey);
+  const rel = await latestFor(repo);
+  const { label, choices, auto, close } = core.assetChoices(
+    rel.assets, repo.type, null, await flavorFor(repo), null, detect.osRelease()
+  );
+  const names = (rel.assets || []).map((a) => a.name);
+  let current = null;
+  if (repo.asset) {
+    try { current = core.matchAsset(rel.assets, repo.asset).name; } catch {}
+  }
+  for (const c of choices) c.pattern = core.assetPatternFor(c.name, rel.tag_name, names);
+  return { tag: rel.tag_name, type: repo.type, label, choices, auto, close, pattern: repo.asset || null, current };
+});
+// Which of `names` a pattern typed in the chooser matches. Pure — no config change here;
+// the renderer saves the chosen pattern through config:save like every other edit.
+ipcMain.handle('asset:match', (_e, pattern, names) => {
+  try {
+    const test = core.compilePattern(String(pattern || ''));
+    return { hits: (Array.isArray(names) ? names : []).filter((n) => test(String(n))) };
+  } catch (e) {
+    return { error: e.message };
+  }
 });
 // --- Self-update (portable, run-as-is) ----------------------------------------
 // Checked only when the user runs "Check all" — no network at startup, same as

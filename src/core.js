@@ -213,6 +213,96 @@ function pickAsset(assets, type, arch, flavor, platform, host) {
   return best;
 }
 
+// ---------------------------------------------------------------------------
+// Choosing an asset by hand.
+//
+// Auto-pick is a score, and some releases have no right answer to score: two .debs for
+// two Ubuntu releases, a tarball beside an AppImage, or nothing that names this platform
+// at all. The user picks once; what is saved is a PATTERN made from that file's name with
+// the version swapped for "*", so next release's equivalent file matches with no prompt.
+// ---------------------------------------------------------------------------
+
+// Files in a release that are never the build itself: checksums, signatures, update
+// feeds, SBOMs. Hidden from the chooser so the list is only things that could install.
+const METADATA_ASSET =
+  /\.(sha\d*|sha\d*sum|md5|sig|asc|minisig|pem|crt|cert|blockmap|ya?ml|json|txt|sbom|spdx|intoto\.jsonl|sigstore)$|^(sha\d*sums|checksums|md5sums)\b/i;
+
+// A remembered pattern for a chosen file: every occurrence of the release's version in
+// the name becomes "*". Falls back to the exact name when the version does not appear
+// (an unversioned file name stays stable on its own) or is too short to replace safely —
+// a bare "1" would turn half the name into wildcards.
+function assetPatternFor(name, tag, names) {
+  const n = String(name || '');
+  if (/[*?]/.test(n) || (n.length > 1 && n[0] === '/' && n[n.length - 1] === '/')) {
+    // Would be read as a glob/regex; pin it with an escaped, anchored regex instead.
+    return '/^' + n.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '$/';
+  }
+  const raw = String(tag == null ? '' : tag).trim();
+  const ver = normTag(raw);
+  // Longest form first: "v1.2.3" before "1.2.3", so the "v" is not left stranded.
+  const forms = [...new Set([raw, ver])].filter((v) => v && /\d/.test(v) && (v.length >= 3 || /\d\.\d/.test(v)));
+  forms.sort((a, b) => b.length - a.length);
+  for (const v of forms) {
+    if (!n.toLowerCase().includes(v.toLowerCase())) continue;
+    const re = new RegExp(v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const pattern = n.replace(re, '*');
+    // The wildcard must not swallow a sibling: if it matches more than the chosen file in
+    // THIS release, it would be ambiguous next release too. The exact name is the safe pin.
+    if (names && names.filter(compilePattern(pattern)).length !== 1) return n;
+    return pattern;
+  }
+  return n;
+}
+
+// Every asset in a release, classified for the chooser. status:
+//   'ok'         this platform and package type would accept it (score is its rank)
+//   'other-type' fits the OTHER type (an installer while the app is portable, or vice versa)
+//   'unknown'    nothing marks it as a build for this platform — selectable, with a warning
+//   'rejected'   named for another platform, or source/debug files — selectable, warned harder
+// `auto` marks what auto-pick would choose; `close` is true when another 'ok' asset scores
+// within a point of it, i.e. auto-pick was close to a coin flip.
+function assetChoices(assets, type, arch, flavor, platform, host) {
+  const table = assetTable(platform);
+  const all = (assets || []).filter((a) => a && a.name && !METADATA_ASSET.test(a.name));
+  const drop = table.id === 'darwin' ? new Set() : macCompanionZips(all.map((a) => a.name));
+  const a4 = arch || (typeof process !== 'undefined' && process.arch) || 'x64';
+  const other = type === 'installer' ? 'portable' : 'installer';
+  const out = all.map((a) => {
+    const score = drop.has(a.name) ? -Infinity : scoreAsset(a.name, type, a4, flavor, table, host);
+    let status = 'ok';
+    if (score === -Infinity) {
+      if (drop.has(a.name) || table.reject.test(a.name)) status = 'rejected';
+      else status = scoreAsset(a.name, other, a4, null, table, host) !== -Infinity ? 'other-type' : 'unknown';
+    }
+    return { name: a.name, size: a.size || 0, score: score === -Infinity ? null : score, status, auto: false };
+  });
+  let auto = null;
+  try {
+    auto = pickAsset(assets, type, a4, flavor, table.id, host).name;
+  } catch {}
+  const rank = { ok: 0, unknown: 1, rejected: 2, 'other-type': 3 };
+  out.sort((x, y) => rank[x.status] - rank[y.status] || (y.score || 0) - (x.score || 0) || x.name.localeCompare(y.name));
+  const ok = out.filter((c) => c.status === 'ok');
+  for (const c of out) c.auto = c.name === auto;
+  const close = ok.length > 1 && ok[0].score - ok[1].score <= 1;
+  return { label: table.label, choices: out, auto, close };
+}
+
+// The asset an app would install from this release: its saved pattern when it has one,
+// otherwise auto-pick. Failures that a hand choice would fix carry `chooseAsset`, so the
+// UI can offer the chooser instead of a dead-end error.
+function resolveAsset(repo, assets, flavor, platform, host) {
+  try {
+    return repo.asset
+      ? matchAsset(assets, repo.asset)
+      : pickAsset(assets, repo.type, null, flavor, platform, host);
+  } catch (e) {
+    // "only ships an installer/portable" already names its own fix (change the type).
+    if (!/only ships (portable builds|an installer)/.test(e.message)) e.chooseAsset = true;
+    throw e;
+  }
+}
+
 // Always picks a WINDOWS asset regardless of the running OS. Kept so the Windows
 // behaviour (and its test suite) stays pinned and platform-independent.
 function pickWindowsAsset(assets, type, arch, flavor) {
@@ -399,6 +489,13 @@ function validateConfig(json) {
       throw new Error(`${at}: "tagPrefix" must be a non-empty string`);
     }
     // asset is optional: omitted -> engine auto-picks this platform's asset from `type`.
+    if (r.asset != null) {
+      try {
+        compilePattern(r.asset);
+      } catch (e) {
+        throw new Error(`${at}: "asset" is not a valid pattern (${e.message})`);
+      }
+    }
     if (r.type === 'portable') {
       if (!r.install) r.install = {};
       if (!r.install.dir) {
@@ -519,6 +616,9 @@ module.exports = {
   matchAsset,
   pickAsset,
   pickWindowsAsset,
+  assetPatternFor,
+  assetChoices,
+  resolveAsset,
   guessKind,
   installerCmd,
   validateConfig,

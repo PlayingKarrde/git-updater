@@ -97,7 +97,14 @@ async function run(config, opts = {}) {
     try {
       results.push(await handleRepo(repo, id, st, { ...opts, portableRoot: core.portableRootFor(config, repo) }));
     } catch (e) {
-      results.push({ repo: id, id: appKey(repo), status: 'failed', reason: e.message, stopRun: !!e.rateLimited || !!e.badToken });
+      results.push({
+        repo: id,
+        id: appKey(repo),
+        status: 'failed',
+        reason: e.message,
+        stopRun: !!e.rateLimited || !!e.badToken,
+        ...(e.chooseAsset ? { chooseAsset: true, from: e.from, to: e.to } : {}),
+      });
       log(`FAIL ${appKey(repo)}: ${e.message}`);
       if (e.rateLimited || e.badToken) break; // every later call would fail the same way and burn more quota
     }
@@ -189,16 +196,23 @@ async function handleRepo(repo, id, st, opts) {
 
   const base = { repo: id, id: key, from: fromV, to: core.normTag(latest) };
 
-  if (opts.mode === 'check') return { ...base, status: 'updated', ...(retyped ? { retyped, note: retyped.note } : {}) };
-
   // Manual `asset` pattern overrides; otherwise auto-pick this platform's asset from
   // the type. For installers, match the flavor of the EXISTING install (msi vs exe on
   // Windows, deb vs rpm on Linux) so the update upgrades in place instead of installing
-  // a duplicate side-by-side.
+  // a duplicate side-by-side. A failure here that choosing a file by hand would fix
+  // (nothing matched, a saved pattern stopped matching) is flagged `chooseAsset`.
   const flavor = repo.type === 'installer' ? await detect.installedFlavor(repo.detect || repo.repo) : null;
-  const asset = repo.asset
-    ? core.matchAsset(rel.assets, repo.asset)
-    : core.pickAsset(rel.assets, repo.type, null, flavor, null, detect.osRelease());
+  let asset;
+  try {
+    asset = core.resolveAsset(repo, rel.assets, flavor, null, detect.osRelease());
+  } catch (e) {
+    // At check time only the choosable failures are reported: anything else stays the
+    // update run's to raise, exactly as before this check learned to look at assets.
+    if (e.chooseAsset) Object.assign(e, { from: base.from, to: base.to }); // the row still shows versions
+    if (opts.mode !== 'check' || e.chooseAsset) throw e;
+  }
+
+  if (opts.mode === 'check') return { ...base, status: 'updated', ...(retyped ? { retyped, note: retyped.note } : {}) };
 
   if (opts.dryRun) {
     const verb = /\.(zip|7z|tar\.gz|tgz|tar\.xz|tar\.bz2|tar|dmg)$/i.test(asset.name) ? 'extract' : 'place';

@@ -51,6 +51,11 @@ bonuses — are all in `src/platform/assets.js`, which is pure data so `core.js`
 
 Optional per-app overrides (rarely needed):
 - `"asset": "*-win-x64.zip"` (glob or `/regex/`) pins a specific file instead of auto-pick.
+  The app sets this from **⋯ → Choose download…**: it lists the latest release's files ranked
+  for this machine and saves the picked file's name with the release version replaced by `*`
+  (`core.assetPatternFor`), so later releases match the same kind of file. When nothing fits
+  automatically, or a saved pattern stops matching, the failure carries `chooseAsset` and the
+  row offers **Choose…** instead of a bare error — at check time as well as on update.
 - Portable: `"install": { "dir": "D:/Custom" }` to override the folder (it wins over a category).
 - Installer: `"install": { "kind": "inno", "args": ["/VERYSILENT"] }` — required when detection
   can't identify an unusual installer (`kind` is `msi` | `nsis` | `inno` | `pkg` | `deb` | `rpm`).

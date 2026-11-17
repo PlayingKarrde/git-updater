@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   pickFolder: (title, startDir) => ipcRenderer.invoke('pick-folder', title, startDir),
   openRelease: (owner, repo) => ipcRenderer.invoke('release:open', { owner, repo }),
   previewAsset: (appKey) => ipcRenderer.invoke('asset:preview', appKey),
+  assetChoices: (appKey) => ipcRenderer.invoke('asset:choices', appKey),
+  matchAsset: (pattern, names) => ipcRenderer.invoke('asset:match', pattern, names),
   check: (body) => ipcRenderer.invoke('check', body),
   update: (body) => ipcRenderer.invoke('update', body),
   onProgress: (cb) => ipcRenderer.on('update:progress', (_e, data) => cb(data)),
