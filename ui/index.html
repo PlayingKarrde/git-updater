@@ -201,6 +201,38 @@
   #selfupDismiss { background: none; border: none; color: inherit; opacity: .6; cursor: pointer;
                    font-size: 1rem; line-height: 1; padding: 0 .2rem; }
   #selfupDismiss:hover { opacity: 1; }
+  /* Download chooser */
+  .modal { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center;
+           background: rgba(1,4,9,.65); padding: 1rem; }
+  .modal.show { display: flex; }
+  .modal .panel { width: min(680px, 100%); max-height: calc(100vh - 2rem); display: flex; flex-direction: column; margin: 0; }
+  .modal h2 { font: 600 15px var(--sans); margin: 0; }
+  .modal .sub { font: 400 12.5px var(--mono); color: var(--muted); margin: .15rem 0 .6rem; overflow-wrap: anywhere; }
+  .modal .note { font-size: 12.5px; margin: 0 0 .6rem; padding: .45rem .6rem; border-radius: 8px;
+                 color: var(--accent); background: rgba(227,161,60,.1); border: 1px solid rgba(227,161,60,.3); }
+  .alist { overflow-y: auto; min-height: 4rem; border: 1px solid var(--border); border-radius: 8px; }
+  .aopt { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: .2rem .55rem; align-items: center;
+          padding: .45rem .6rem; border-top: 1px solid var(--border); cursor: pointer; }
+  .aopt:first-child { border-top: 0; }
+  .aopt:hover { background: #1f252d; }
+  .aopt.sel { background: rgba(227,161,60,.08); }
+  .aopt.off { cursor: default; opacity: .5; }
+  .aopt.off:hover { background: transparent; }
+  .aopt input { margin: 0; accent-color: var(--accent); }
+  .aopt .an { font: 500 13px var(--mono); overflow-wrap: anywhere; }
+  .aopt .sz { font-size: 12px; color: var(--faint); white-space: nowrap; }
+  .aopt .why { grid-column: 2 / 4; font-size: 12px; color: var(--muted); }
+  .aopt .why.warn { color: var(--accent); }
+  .aopt .why.bad { color: var(--red); }
+  .tag { display: inline-block; font: 600 11px var(--sans); padding: 0 .4rem; border-radius: 999px; margin-left: .35rem;
+         color: var(--blue); background: rgba(88,166,255,.12); border: 1px solid rgba(88,166,255,.3); vertical-align: 1px; }
+  .tag.saved { color: var(--green); background: rgba(63,185,80,.12); border-color: rgba(63,185,80,.3); }
+  .pat-row { display: flex; gap: .5rem; align-items: center; margin-top: .7rem; }
+  .pat-row input { flex: 1; min-width: 0; height: 33px; font-size: 13px; }
+  #patStatus { font-size: 12px; margin: .3rem 0 0; min-height: 1rem; }
+  #patStatus.ok { color: var(--green); } #patStatus.bad { color: var(--red); } #patStatus.warn { color: var(--accent); }
+  .modal .btns { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .8rem; }
+  .modal .btns .left { margin-right: auto; }
   #selfupDismiss:disabled { opacity: .25; cursor: default; }
 </style>
 </head>
@@ -274,6 +306,26 @@
     </div>
   </div>
 
+  <div class="modal" id="assetDlg" role="dialog" aria-modal="true" aria-labelledby="assetTitle">
+    <div class="panel">
+      <h2 id="assetTitle">Choose the download</h2>
+      <p class="sub" id="assetSub"></p>
+      <p class="note" id="assetNote" style="display:none"></p>
+      <div class="alist" id="assetList"></div>
+      <div class="pat-row">
+        <span style="color:var(--muted);font-size:12px;flex:none">Remember as</span>
+        <input type="text" id="assetPat" spellcheck="false" aria-label="Download pattern">
+      </div>
+      <p id="patStatus"></p>
+      <p class="hint" style="margin-top:.2rem">The version number is replaced with <code>*</code> so future releases pick the same kind of file. Edit it if you like: <code>*</code> matches anything, or wrap a regular expression in <code>/…/</code>.</p>
+      <div class="btns">
+        <button id="assetAuto" class="left ghost">Go back to automatic</button>
+        <button id="assetCancel">Cancel</button>
+        <button id="assetSave" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <details class="settings" id="settings">
     <summary>Settings</summary>
     <div class="panel" style="margin-top:.6rem">
@@ -309,7 +361,7 @@
         <button id="editJson">Edit config.json</button>
         <button id="openLog">Open log</button>
       </div>
-      <p class="hint">Hand-edit for per-app overrides (asset pattern, install dir, installer kind/args, process name, release tag prefix).</p>
+      <p class="hint">Hand-edit for per-app overrides (install dir, installer kind/args, process name, release tag prefix). To pick which download an app uses, choose ⋯ → Choose download… on its row.</p>
       <div class="row" style="margin-top:.6rem">
         <span style="color:var(--muted);font-size:.9rem;min-width:8rem">git-updater updates</span>
         <label class="scan-label"><input type="checkbox" id="selfPreRel"> Update git-updater to beta (pre-release) versions</label>
@@ -362,7 +414,7 @@ function statusView(s) {
     case 'available': return s.present ? { text: 'Update available', cls: 'c-up' } : { text: 'Available to install', cls: 'c-up' };
     case 'installed': return { text: 'Installed', cls: 'c-ok' };
     case 'updated': return { text: 'Updated', cls: 'c-ok' };
-    case 'failed': return { text: s.reason || 'Failed', cls: 'c-bad' };
+    case 'failed': return s.chooseAsset ? { text: 'Choose a download', cls: 'c-warn', tip: s.reason } : { text: s.reason || 'Failed', cls: 'c-bad' };
     default: return s.present ? { text: 'Not checked', cls: 'c-muted' } : { text: 'Not installed', cls: 'c-warn' };
   }
 }
@@ -502,17 +554,19 @@ function renderRow(r, group) {
 
   // Status
   const sv = statusView(s);
-  const stTxt = el('span', 'txt', sv.text); stTxt.title = sv.text;
+  const stTxt = el('span', 'txt', sv.text); stTxt.title = sv.tip || sv.text;
   const stEl = el('span', 'status st ' + sv.cls); stEl.append(el('span', 'dot'), stTxt);
   row.appendChild(stEl);
 
   // Actions
   const act = el('div', 'row-actions');
   const runningFail = s.ph === 'failed' && /is running/.test(s.reason || '');
-  const label = runningFail ? 'Retry' : primaryAction(s);
+  const choose = s.ph === 'failed' && s.chooseAsset;
+  const label = choose ? 'Choose…' : runningFail ? 'Retry' : primaryAction(s);
   const b = el('button', 'primary rowbtn', label); b.disabled = busy;
   if (runningFail) b.title = 'Close the app and retry the update';
-  b.onclick = () => (runningFail ? closeAndRetry(r, key) : label === 'Check' ? checkApps([key]) : runBatch([key]));
+  if (choose) b.title = 'No download in the latest release fits automatically — pick one';
+  b.onclick = () => (choose ? openAssetChooser(r) : runningFail ? closeAndRetry(r, key) : label === 'Check' ? checkApps([key]) : runBatch([key]));
   act.appendChild(b);
   const kb = el('button', 'kebab ghost', '⋯'); kb.title = 'More';
   kb.onclick = (ev) => { ev.stopPropagation(); openMenu(r, kb); };
@@ -553,10 +607,13 @@ function openMenu(r, anchor) {
   item(s.ph === 'failed' ? 'Retry' : !s.present ? 'Install' : 'Update', () => runBatch([key]));
   sep();
   item('View release ↗', () => window.api.openRelease(r.owner, r.repo));
-  item('Preview selected asset', async () => {
-    try { const { tag, asset } = await window.api.previewAsset(key); msg(`${r.owner}/${r.repo} @ ${tag} → ${asset}`, 'info'); }
-    catch (e) { msg(clean(e), 'bad'); }
+  item('Preview download', async () => {
+    try {
+      const { tag, asset, pinned } = await window.api.previewAsset(key);
+      msg(`${r.owner}/${r.repo} @ ${tag} → ${asset}${pinned ? ' (your choice)' : ' (automatic)'}`, 'info');
+    } catch (e) { msg(clean(e), 'bad'); }
   });
+  item(r.asset ? 'Change download…' : 'Choose download…', () => openAssetChooser(r));
   if (r.type === 'portable') item('Open folder', () => window.api.openFolder(key));
   sep();
   item('Edit…', () => startEdit(r));
@@ -908,6 +965,109 @@ async function closeAndRetry(r, key) {
   runBatch([key]);
 }
 
+// --- download chooser ---
+// Lists every file in the latest release, ranked for this computer. Picking one saves a
+// pattern (the file name with its version as *) in the app's "asset" field, so the next
+// release picks the same kind of file by itself. "Go back to automatic" removes it.
+const fmtSize = (n) => (!n ? '' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+let chooser = null; // { r, data, pick }
+function closeChooser() { $('assetDlg').classList.remove('show'); chooser = null; }
+async function openAssetChooser(r) {
+  if (busy) return msg('Wait for the current check or update to finish.', 'bad');
+  msg(`Loading the files in ${r.owner}/${r.repo}'s latest release…`, 'info');
+  let data;
+  try { data = await window.api.assetChoices(keyOf(r)); }
+  catch (e) { return msg(clean(e), 'bad'); }
+  msg('', '');
+  const pick = data.current || data.auto || (data.choices.find((c) => c.status !== 'other-type') || {}).name || null;
+  chooser = { r, data, pick };
+  $('assetSub').textContent = `${r.owner}/${r.repo} · ${data.tag} · ${r.type === 'installer' ? 'Installer' : 'Portable'} on ${data.label}`;
+  const note = $('assetNote');
+  const notes = [];
+  if (data.pattern && !data.current) notes.push(`Your saved choice (${data.pattern}) matches nothing in this release — the project may have renamed its files. Pick again.`);
+  else if (!data.pattern && !data.auto) notes.push(`Nothing in this release is clearly a ${data.label} ${r.type} build, so git-updater won't guess. If one of these is right, pick it.`);
+  else if (!data.pattern && data.close) notes.push('Several files look equally right for this computer, so the automatic pick is close to a guess. Check it is the one you want.');
+  note.textContent = notes.join(' ');
+  note.style.display = notes.length ? '' : 'none';
+  $('assetAuto').style.display = data.pattern ? '' : 'none';
+  renderChoices();
+  $('assetPat').value = (data.choices.find((c) => c.name === pick) || {}).pattern || data.pattern || '';
+  if (data.current && data.pattern) $('assetPat').value = data.pattern; // keep a hand-edited pattern as it was
+  checkPattern();
+  $('assetDlg').classList.add('show');
+}
+function renderChoices() {
+  const { data, pick, r } = chooser;
+  const list = $('assetList');
+  list.innerHTML = '';
+  if (!data.choices.length) list.appendChild(el('div', 'empty', 'This release has no downloadable files.'));
+  const otherType = r.type === 'installer' ? 'Portable' : 'Installer';
+  data.choices.forEach((c) => {
+    const off = c.status === 'other-type';
+    const row = el('label', 'aopt' + (c.name === pick ? ' sel' : '') + (off ? ' off' : ''));
+    const rb = el('input'); rb.type = 'radio'; rb.name = 'assetPick'; rb.checked = c.name === pick; rb.disabled = off;
+    const nm = el('span', 'an', c.name);
+    if (c.auto) nm.appendChild(el('span', 'tag', 'automatic pick'));
+    if (c.name === data.current) nm.appendChild(el('span', 'tag saved', 'your choice'));
+    row.append(rb, nm, el('span', 'sz', fmtSize(c.size)));
+    const why = {
+      'other-type': [`A ${otherType.toLowerCase()} build. To use it, Edit the app and change its type to ${otherType}.`, ''],
+      rejected: [`Looks like a build for another platform, source code or debug files — not ${data.label}.`, 'bad'],
+      unknown: [`Nothing in the name says it is a ${data.label} ${r.type} build. Choose it only if you know it is.`, 'warn'],
+    }[c.status];
+    if (why) row.appendChild(el('span', 'why ' + why[1], why[0]));
+    if (!off) rb.onchange = () => { chooser.pick = c.name; $('assetPat').value = c.pattern; renderChoices(); checkPattern(); };
+    list.appendChild(row);
+  });
+}
+// Live check of the pattern against this release: it must match exactly one file, and
+// that file should be the one ticked above.
+let patSeq = 0;
+async function checkPattern() {
+  if (!chooser) return;
+  const seq = ++patSeq;
+  const pat = $('assetPat').value.trim();
+  const names = chooser.data.choices.map((c) => c.name);
+  const out = $('patStatus');
+  const set = (t, c) => { out.textContent = t; out.className = c; $('assetSave').disabled = c === 'bad'; };
+  if (!pat) return set('Pick a file above, or type a pattern.', 'bad');
+  const res = await window.api.matchAsset(pat, names).catch((e) => ({ error: clean(e) }));
+  if (seq !== patSeq || !chooser) return;
+  if (res.error) return set(`Not a valid pattern: ${res.error}`, 'bad');
+  if (!res.hits.length) return set('Matches no file in this release.', 'bad');
+  if (res.hits.length > 1) return set(`Matches ${res.hits.length} files (${res.hits.join(', ')}) — make it more specific.`, 'bad');
+  const hit = res.hits[0];
+  const hc = chooser.data.choices.find((c) => c.name === hit);
+  if (hc && hc.status === 'other-type') return set(`Matches ${hit}, which is a ${chooser.r.type === 'installer' ? 'portable' : 'installer'} build — change the app's type to use it.`, 'bad');
+  if (hit !== chooser.pick) {
+    // Typing a pattern that lands on a different file moves the tick to it, so what is
+    // saved and what is shown never disagree.
+    chooser.pick = hit; renderChoices();
+  }
+  set(`Matches ${hit}.`, 'ok');
+}
+$('assetPat').addEventListener('input', checkPattern);
+$('assetPat').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('assetSave').disabled) $('assetSave').click(); });
+$('assetCancel').onclick = closeChooser;
+$('assetDlg').addEventListener('click', (e) => { if (e.target === $('assetDlg')) closeChooser(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && chooser) closeChooser(); });
+async function saveAssetChoice(pattern) {
+  const { r } = chooser;
+  const key = keyOf(r);
+  const entry = config.repos.find((x) => keyOf(x) === key);
+  closeChooser();
+  if (!entry) return;
+  const prev = entry.asset;
+  if (pattern) entry.asset = pattern; else delete entry.asset;
+  if (!(await saveConfig())) { if (prev) entry.asset = prev; else delete entry.asset; return; }
+  msg(pattern ? `${r.repo} will download ${pattern} from now on.` : `${r.repo} picks its download automatically again.`, 'ok');
+  if (st[key] && st[key].ph === 'failed') st[key] = { ...st[key], ph: 'idle', chooseAsset: false, reason: null };
+  renderRepos();
+  checkApps([key]);
+}
+$('assetSave').onclick = () => { const p = $('assetPat').value.trim(); if (p) saveAssetChoice(p); };
+$('assetAuto').onclick = () => saveAssetChoice(null);
+
 // --- check / update ---
 async function checkApps(keys) {
   if (busy) return;
@@ -921,7 +1081,7 @@ async function checkApps(keys) {
       if (r) {
         const s = st[k] || {};
         if (r.retyped && retyped[r.retyped.to]) retyped[r.retyped.to].push(k.split('#')[0]);
-        if (r.status === 'failed') st[k] = { ...s, ph: 'failed', reason: r.reason };
+        if (r.status === 'failed') st[k] = { ...s, ph: 'failed', reason: r.reason, chooseAsset: !!r.chooseAsset, to: r.to || s.to };
         else st[k] = { ...s, ph: r.status === 'current' ? 'current' : 'available', from: r.from || s.from, to: r.to, present: s.present };
       }
       renderRepos();
@@ -938,6 +1098,8 @@ async function checkApps(keys) {
     // updates stop landing in the portable folder and start asking for authorization.
     // Either way the user can only decide whether they want it if we tell them.
     const parts = [];
+    const choose = keys.filter((k) => st[k]?.ph === 'failed' && st[k].chooseAsset).map((k) => k.split('#')[0]);
+    if (choose.length) parts.push(`${choose.join(', ')}: no download fits automatically — click Choose… to pick one.`);
     if (retyped.portable.length)
       parts.push(
         `${retyped.portable.join(', ')} switched to Portable — ${retyped.portable.length > 1 ? 'these publish' : 'this publishes'} no installer, so the portable copy installs alongside any existing one.`
@@ -967,7 +1129,7 @@ async function runBatch(keys, force) {
       else if (r.status === 'updated') { st[k] = { ...s, ph: wasInstall ? 'installed' : 'updated', from: r.to, to: r.to, present: true }; wasInstall ? installed++ : done++; }
       else if (r.status === 'current') { st[k] = { ...s, ph: 'current', to: r.to }; }
       else if (/installer window opened/.test(r.reason || '')) { st[k] = { ...s, ph: 'waiting', to: r.to }; watchInstall(k, s.from); }
-      else { st[k] = { ...s, ph: 'failed', reason: r.reason }; failed++; }
+      else { st[k] = { ...s, ph: 'failed', reason: r.reason, chooseAsset: !!r.chooseAsset, to: r.to || s.to }; failed++; }
       if (r && r.stopRun) { // same as checkApps: the rest would only fail the same way
         keys.slice(keys.indexOf(k) + 1).forEach((x) => { st[x] = { ...(st[x] || {}), ph: 'failed', reason: r.reason }; failed++; });
         renderRepos();
@@ -979,10 +1141,12 @@ async function runBatch(keys, force) {
   busy = false; renderRepos();
   const waiting = keys.filter((k) => st[k]?.ph === 'waiting').length;
   const parts = [];
+  const choose = keys.filter((k) => st[k]?.ph === 'failed' && st[k].chooseAsset).length;
   if (done) parts.push(`${done} updated`);
   if (installed) parts.push(`${installed} installed`);
   if (waiting) parts.push(`${waiting} waiting for its installer window`);
   if (failed) parts.push(`${failed} failed`);
+  if (choose) parts.push(`${choose === 1 ? 'one needs' : `${choose} need`} you to choose which download to use — click Choose… on ${choose === 1 ? 'its row' : 'their rows'}`);
   msg(parts.length ? parts.join(', ') + '.' : 'Nothing to update.', failed ? 'bad' : 'ok');
 }
 
