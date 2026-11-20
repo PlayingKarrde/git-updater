@@ -49,8 +49,41 @@ const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
 const EXE = IS_WIN ? 'git-updater.exe' : 'git-updater';
 
-// Whether a found update can be APPLIED in place on this platform, or only reported.
-const canApply = () => !IS_MAC;
+// --- AppImage ------------------------------------------------------------------
+// Run as an AppImage, process.execPath is inside the image's read-only squashfs mount
+// (/tmp/.mount_XXXX/), which also vanishes when the process exits — so the app-<version>
+// sibling model has nowhere to write and nothing to hand off to (EROFS on mkdtemp). The
+// AppImage runtime exports the image's own path as $APPIMAGE, and that FILE is the unit
+// to update: write the new image beside it and rename it over the old one. A rename never
+// disturbs the running copy (its mount holds the old inode), and the user's shortcut,
+// desktop entry or terminal habit keeps pointing at the same path.
+function appImageFile(env = process.env, platform = process.platform) {
+  const p = platform === 'linux' && env.APPIMAGE;
+  if (!p || !path.isAbsolute(p)) return null;
+  try {
+    return fs.statSync(p).isFile() ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+function dirWritable(dir) {
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Whether a found update can be APPLIED in place on this platform, or only reported. An
+// AppImage in a folder the user cannot write (e.g. /opt, installed by root) is reported
+// only, and the UI offers the release page.
+const canApply = (env = process.env, platform = process.platform) => {
+  if (platform === 'darwin') return false;
+  const img = appImageFile(env, platform);
+  return img ? dirWritable(path.dirname(img)) : true;
+};
 const VERSION_DIR = /^app-(\d.*)$/;
 const STAGE_PREFIX = '.git-updater-selfupdate-stage-';
 const SELF_ROOT = path.join(paths.dataDir(), 'self-update');
@@ -177,6 +210,7 @@ async function waitForExit(pid, deps = {}) {
 // The assets this updater can update ITSELF from, which is a narrower set than the ones
 // it can install for other apps.
 //
+// (A run FROM an AppImage updates the image file itself instead — see appImageFile.)
 // The launcher model needs a DIRECTORY: app-<version>/ containing an executable named
 // git-updater, sitting beside the launcher. An AppImage is a single self-contained file,
 // so there is nothing to put a versioned sibling inside and nothing at app-<version>/
@@ -210,12 +244,21 @@ async function checkForUpdate(currentVersion, opts = {}) {
 // never existed, the same operation every tracked-app fresh install already does. A
 // failure anywhere leaves the running version and the launcher completely untouched.
 async function prepareUpdate(root, currentVersion, onProgress = () => {}, opts = {}) {
-  if (!canApply()) throw new Error('applying an update in place is not supported on this platform');
+  const env = opts.env || process.env;
+  const platform = opts.platform || process.platform;
+  const img = appImageFile(env, platform);
+  if (!canApply(env, platform)) {
+    throw new Error(
+      img
+        ? `can't replace ${img} — its folder is not writable. Download the new version from the release page instead.`
+        : 'applying an update in place is not supported on this platform'
+    );
+  }
   const found = await checkForUpdate(currentVersion, opts);
   if (!found) throw new Error('no newer release found');
   const { rel, version: tag } = found;
 
-  const asset = core.pickAsset(selfUpdateAssets(rel.assets), 'portable');
+  const asset = img ? appImageAsset(rel.assets) : core.pickAsset(selfUpdateAssets(rel.assets), 'portable');
 
   const downloadDir = path.join(SELF_ROOT, tag);
   fs.mkdirSync(downloadDir, { recursive: true });
@@ -234,6 +277,12 @@ async function prepareUpdate(root, currentVersion, onProgress = () => {}, opts =
   if (v && v.skipped) log(`  WARN self-update: ${v.note}`);
 
   onProgress('installing');
+  if (img) {
+    replaceFile(file, img);
+    fs.rmSync(downloadDir, { recursive: true, force: true });
+    log(`self-update: ${tag} written to ${img}`);
+    return { tag, dir: path.dirname(img), appImage: img };
+  }
   const target = path.join(root, `app-${tag}`);
   await withoutAsar(async () => {
     fs.rmSync(target, { recursive: true, force: true }); // a previous partial attempt
@@ -252,8 +301,54 @@ async function prepareUpdate(root, currentVersion, onProgress = () => {}, opts =
   return { tag, dir: target };
 }
 
-// The launcher restarts the app into the newest version once this process is gone.
-function relaunchViaLauncher(root, pid) {
+// The AppImage among a release's assets for this machine's architecture.
+function appImageAsset(assets) {
+  const list = (assets || []).filter((a) => /\.appimage$/i.test(a.name || ''));
+  if (!list.length) throw new Error('this release has no AppImage to update to — download it from the release page');
+  return core.pickAsset(list, 'portable', null, null, 'linux');
+}
+
+// Copy beside the target (same filesystem, so the final step is an atomic rename), mark it
+// executable, then rename over the old image. The running process keeps its mount of the
+// old inode; the next launch of the same path gets the new build.
+function replaceFile(src, target) {
+  const tmp = path.join(path.dirname(target), `.${path.basename(target)}.new-${process.pid}`);
+  try {
+    fs.copyFileSync(src, tmp);
+    fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, target);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+// The AppImage runtime's own variables, and library paths into THIS image's mount, must
+// not leak into the relaunched image: its runtime sets fresh ones, and the old mount is
+// gone the moment this process exits.
+function relaunchEnv(env = process.env) {
+  const out = { ...env };
+  const appDir = env.APPDIR;
+  for (const k of ['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD']) delete out[k];
+  if (appDir) {
+    for (const k of ['LD_LIBRARY_PATH', 'PATH', 'XDG_DATA_DIRS', 'GSETTINGS_SCHEMA_DIR', 'PYTHONPATH', 'PERLLIB', 'QT_PLUGIN_PATH']) {
+      if (out[k] == null) continue;
+      const kept = String(out[k]).split(':').filter((p) => p && !p.startsWith(appDir));
+      if (kept.length) out[k] = kept.join(':');
+      else delete out[k];
+    }
+  }
+  return out;
+}
+
+// The launcher restarts the app into the newest version once this process is gone. An
+// AppImage relaunches its own (now replaced) file instead — there is no launcher folder.
+function relaunchViaLauncher(root, pid, env = process.env) {
+  const img = appImageFile(env);
+  if (img) {
+    spawn(img, ['--wait-pid', String(pid)], { detached: true, stdio: 'ignore', env: relaunchEnv(env) }).unref();
+    return;
+  }
   launch(root, ['--wait-pid', String(pid)]);
 }
 
@@ -322,6 +417,10 @@ async function cleanupLeftovers(root, currentVersion) {
 
 module.exports = {
   selfUpdateAssets,
+  appImageFile,
+  appImageAsset,
+  replaceFile,
+  relaunchEnv,
   REPO: { owner: REPO_OWNER, repo: REPO_NAME },
   canApply,
   makeExecutable,
